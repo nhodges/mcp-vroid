@@ -8,19 +8,30 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from . import capture as C
-from . import input as I
+from .backend import capture as C
+from .backend import input as I
 from . import locate as L
-from . import window as W
-from .capture import Shot
+from .backend import window as W
+from .shot import Shot
 from .paths import OUT
 
-# Anchors expressed as fractions of the captured window, so they survive a
-# different monitor/scale. Measured on 2560x1440 (Hyprland scale 1.25).
-F_CLOSE_X = (0.0090, 0.0160)      # top-left "x" that leaves a full-screen view
-F_EXPORT_ICON = (0.9625, 0.0160)  # share/upload icon in the editor toolbar
-F_PARAM_VALUE_X = 0.9785          # x of the numeric box on a Parameters row
-TAB_Y = 0.0160                    # y of the Face/Hairstyle/... tab strip
+# Anchors are image pixels from a window edge: x >= 0 counts from the left,
+# x < 0 from the right (y likewise from the top / bottom). Measured on
+# 2560x1440 (Hyprland scale 1.25).
+#
+# VRoid lays its UI out in fixed pixels, not in proportion to the window:
+# at 1920x1017 the tabs, the left rail and the close box sit at the same
+# pixel positions as at 2560x1440, the toolbar icons and the Parameters
+# value column keep the same distance from the right edge, and modals the
+# same distance from the centre. A fraction of the window only lands on them
+# at the size it was measured at - at 1920 wide, 0.9625 of the width falls
+# between the share icon and the kebab. Search regions and the viewport
+# centre (F_VIEWPORT) stay fractions: they are wide enough not to care.
+F_CLOSE_X = (23, 23)       # top-left "x" that leaves a full-screen view
+F_EXPORT_ICON = (-96, 23)  # share/upload icon in the editor toolbar
+F_PARAM_VALUE_X = -55      # x of the numeric box on a Parameters row
+TAB_Y = 23                 # y of the Face/Hairstyle/... tab strip
+TAB_STRIP_H = 57           # the tab labels are all above this line
 
 TABS = ("Face", "Hairstyle", "Body", "Outfit", "Accessories", "Look")
 
@@ -33,8 +44,14 @@ def _frac(s: Shot, fx: float, fy: float) -> tuple[int, int]:
     return int(s.image.width * fx), int(s.image.height * fy)
 
 
-def _click_frac(s: Shot, fx: float, fy: float, **kw) -> None:
-    I.click(*_frac(s, fx, fy), space="image", shot=s, **kw)
+def _at(s: Shot, x: int, y: int) -> tuple[int, int]:
+    """An edge-relative anchor (see above) placed on this capture."""
+    w, h = s.image.width, s.image.height
+    return (x if x >= 0 else w + x, y if y >= 0 else h + y)
+
+
+def _click_at(s: Shot, x: int, y: int, **kw) -> None:
+    I.click(*_at(s, x, y), space="image", shot=s, **kw)
 
 
 def wait_for(pred, timeout: float = 30.0, poll: float = 1.0, tag: str = ""):
@@ -60,7 +77,7 @@ def wait_for_text(needle: str, timeout: float = 30.0, region=None, **kw):
 def current_screen(s: Shot | None = None) -> str:
     """One of: start, editor, export_vrm, hair_editor, unknown."""
     s = s or shot()
-    top = s.crop((0, 0, s.image.width, int(s.image.height * 0.05)))
+    top = s.crop((0, 0, s.image.width, 72))
     words = {L._norm(m.text) for m in L.all_text(top)}
     if {"vroidediting", "vroid"} & words or "recentlyedited" in words:
         return "start"
@@ -86,7 +103,7 @@ def new_character(base: str = "Fem", timeout: float = 60.0) -> Shot:
     if m is None:
         raise RuntimeError("no 'Create New' tile - not on the start screen?")
     # the "+" card sits directly above its caption
-    I.click(m.center[0], m.center[1] - int(0.076 * s.image.height),
+    I.click(m.center[0], m.center[1] - 109,
             space="image", shot=s)
     time.sleep(1.5)
 
@@ -94,7 +111,7 @@ def new_character(base: str = "Fem", timeout: float = 60.0) -> Shot:
     if m is None:
         raise RuntimeError(f"base chooser never offered {base!r}")
     # the thumbnail sits above its label
-    I.click(m.center[0], m.center[1] - int(0.07 * s.image.height),
+    I.click(m.center[0], m.center[1] - 100,
             space="image", shot=s)
 
     s, ok = wait_for(lambda sh: current_screen(sh) == "editor",
@@ -110,7 +127,7 @@ def new_character(base: str = "Fem", timeout: float = 60.0) -> Shot:
 def open_tab(name: str) -> Shot:
     s = shot()
     m = L.find_text(s, name, region=(0, 0, int(s.image.width * 0.4),
-                                     int(s.image.height * 0.04)))
+                                     TAB_STRIP_H))
     if m is None:
         raise RuntimeError(f"tab {name!r} not found in the tab strip")
     I.click(*m.center, space="image", shot=s)
@@ -119,10 +136,15 @@ def open_tab(name: str) -> Shot:
 
 
 def find_param_row(label: str, s: Shot | None = None):
-    """(shot, Match) for a Parameters label in the right-hand panel."""
+    """(shot, Match) for a Parameters label in the right-hand panel.
+
+    Same matching as find_param(), without the scrolling. A plain
+    find_text() takes any one word of a multi-word label, so "Head Size"
+    could resolve to the "Size" of "Body Size" and the value be typed
+    into the wrong row.
+    """
     s = s or shot()
-    region = (int(s.image.width * 0.68), 0, s.image.width, s.image.height)
-    return s, L.find_text(s, label, region=region)
+    return s, _find_label(s, label)
 
 
 def set_slider(label: str, value: float, s: Shot | None = None) -> Shot:
@@ -135,7 +157,7 @@ def set_slider(label: str, value: float, s: Shot | None = None) -> Shot:
     s, m = find_param_row(label, s)
     if m is None:
         raise RuntimeError(f"no parameter row labelled {label!r}")
-    x = int(s.image.width * F_PARAM_VALUE_X)
+    x = _at(s, F_PARAM_VALUE_X, 0)[0]
     I.click(x, m.center[1], space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
@@ -151,8 +173,8 @@ def drag_slider(label: str, fraction: float, s: Shot | None = None) -> Shot:
     if m is None:
         raise RuntimeError(f"no parameter row labelled {label!r}")
     w = s.image.width
-    x0, x1 = int(w * 0.8900), int(w * 0.9830)   # track ends, measured
-    y = m.center[1] + int(s.image.height * 0.0167)
+    x0, x1 = w - 282, w - 44   # track ends, measured
+    y = m.center[1] + 24
     handle = L.find_color_blobs(s, min_w=8, min_h=8,
                                 region=(x0 - 20, y - 12, x1 + 20, y + 12))
     start_x = handle[0].center[0] if handle else (x0 + x1) // 2
@@ -166,8 +188,8 @@ def set_hex_color(label: str, hexcode: str) -> Shot:
     s, m = find_param_row(label, None)
     if m is None:
         raise RuntimeError(f"no colour row labelled {label!r}")
-    x = int(s.image.width * 0.9435)
-    I.click(x, m.center[1] + int(s.image.height * 0.0167),
+    x = s.image.width - 145
+    I.click(x, m.center[1] + 24,
             space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
@@ -182,8 +204,8 @@ def open_hair_editor(part: str = "Front") -> Shot:
     open_tab("Hairstyle")
     s = shot()
     # rail icons run down the far left; index 1 is the first hair part
-    rail_x = int(s.image.width * 0.0094)
-    rail_y = int(s.image.height * 0.0861)   # 2nd icon
+    rail_x = 24
+    rail_y = 124   # 2nd icon
     I.click(rail_x, rail_y, space="image", shot=s)
     time.sleep(1.5)
 
@@ -216,7 +238,7 @@ def open_hair_editor(part: str = "Front") -> Shot:
 
 def close_hair_editor(save: bool = False) -> Shot:
     s = shot()
-    _click_frac(s, *F_CLOSE_X)
+    _click_at(s, *F_CLOSE_X)
     time.sleep(1.5)
     s, m = wait_for_text("Close Hairstyle Editor", timeout=10)
     if m:
@@ -246,12 +268,16 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
         out_path.unlink()
 
     s = shot("editor-before-export")
-    _click_frac(s, *F_EXPORT_ICON)
+    _click_at(s, *F_EXPORT_ICON)
     time.sleep(1.5)
 
+    # The toolbar menu and the Export pill hang from the top edge at fixed
+    # heights (the pill at y ~197 whatever the window), so these bands are
+    # pixels - 20 % / 25 % of 1440. As fractions of a 705 px window the
+    # pill fell outside.
     s, m = wait_for_text("Export", timeout=15,
                          region=(int(s.image.width * 0.70), 0,
-                                 s.image.width, int(s.image.height * 0.2)))
+                                 s.image.width, 288))
     if m is None:
         raise RuntimeError("toolbar menu has no 'Export as VRM' entry")
     I.click(*m.center, space="image", shot=s)
@@ -264,7 +290,7 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
     # The primary button is white-on-blue; tesseract loses it, so match the
     # button chrome instead.
     b = L.find_button(s, region=(int(s.image.width * 0.68), 0,
-                                 s.image.width, int(s.image.height * 0.25)))
+                                 s.image.width, 360))
     if b is None:
         raise RuntimeError("no accent Export button on the export screen")
     I.click(*b.center, space="image", shot=s)
@@ -283,9 +309,9 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
     for _ in range(8):
         I.scroll(10, cx, cy, space="image", shot=s)
         s = shot("vrm-settings-scroll")
-        b = L.find_button(s, region=(int(s.image.width * 0.38),
+        b = L.find_button(s, region=(s.image.width // 2 - 307,
                                      int(s.image.height * 0.2),
-                                     int(s.image.width * 0.63),
+                                     s.image.width // 2 + 333,
                                      s.image.height))
         if b:
             break
@@ -324,7 +350,7 @@ def select_export_format(version: str = "1.0") -> None:
     m = L.find_text(s, "VRM0.0") or L.find_text(s, "VRMO.0")
     if m is None:
         raise RuntimeError("no VRM0.0 radio in the VRM Settings modal")
-    I.click(m.left - int(s.image.width * 0.008), m.center[1],
+    I.click(m.left - 20, m.center[1],
             space="image", shot=s)
     time.sleep(0.6)
 
@@ -337,30 +363,51 @@ def _fill_vrm_settings(avatar_name: str, creators: str) -> None:
     "Creator" also hits "Creator Copyright" - both of which silently type into
     the wrong box and leave Export greyed out.
     """
+    field_y: dict[str, int] = {}
     for word, text in (("Name", avatar_name), ("Creators", creators)):
         s = shot(f"vrm-field-{word.lower()}")
         title = L.find_text(s, "Settings", region=(
             int(s.image.width * 0.30), 0, int(s.image.width * 0.70),
             int(s.image.height * 0.35)))
         cx = title.center[0] if title else s.image.width // 2
-        region = (int(s.image.width * 0.36), 0, int(s.image.width * 0.64),
+        region = (s.image.width // 2 - 358, 0, s.image.width // 2 + 358,
                   s.image.height)
         hits = L.find_text(s, word, exact=True, all_matches=True, region=region)
         if not hits:
             raise RuntimeError(f"VRM Settings has no {word!r} caption")
         m = min(hits, key=lambda h: h.top)      # topmost = the caption we want
-        I.click(cx, m.center[1] + int(s.image.height * 0.0271),
+        field_y[word] = m.center[1] + 39
+        I.click(cx, field_y[word],
                 space="image", shot=s)
         time.sleep(0.3)
         I.clear_field()
         I.type_text(text)
         time.sleep(0.4)
 
+    # Read each field back from inside its own box. Searching the whole
+    # screen for the text's first hyphen-separated piece ("mcp" of
+    # "mcp-vroid") failed on one misread letter and could pass on the same
+    # word anywhere else. The crop stays inside the box - the blue border of
+    # the focused field, taken in, makes tesseract drop the text entirely -
+    # and is placed from the modal's centre, not from the caption: the
+    # caption match for "Avatar Name" is the word "Name", which starts
+    # halfway along the field.
     s = shot("vrm-fields-filled")
     for word, text in (("Name", avatar_name), ("Creators", creators)):
-        if not L.find_text(s, text.split("-")[0][:8]):
+        y = field_y[word]
+        box = s.crop((s.image.width // 2 - 246, y - 14,
+                      s.image.width // 2 + 230, y + 14))
+        got = "".join(m.text for m in L.ocr_words(box, min_conf=0))
+        if _similar(got, text) < 0.8:
             raise RuntimeError(
-                f"{word} field did not take {text!r} - see {s.path}")
+                f"{word} field did not take {text!r} (OCR reads {got!r}) "
+                f"- see {s.path}")
+
+
+def _similar(a: str, b: str) -> float:
+    """How alike two strings are once case and punctuation are dropped."""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, L._norm(a), L._norm(b)).ratio()
 
 
 def to_wine_path(p: str | Path) -> str:
@@ -382,8 +429,16 @@ def _save_dialog(out_path: Path, timeout: float = 60.0) -> None:
             break
         time.sleep(1.0)
     if win is None:
-        raise RuntimeError("Wine save dialog never appeared")
+        raise RuntimeError("save dialog never appeared")
     time.sleep(1.0)
+
+    # A backend that can drive the dialog as controls does (Windows: the
+    # common dialog, whose labels follow the display language). The rest of
+    # this function is Wine's dialog, driven by keys and checked by OCR.
+    fill = getattr(W, "fill_save_dialog", None)
+    if fill is not None:
+        fill(win, out_path)
+        return
 
     wine_path = to_wine_path(out_path)
     I.type_text(wine_path)
@@ -421,10 +476,7 @@ def _save_dialog(out_path: Path, timeout: float = 60.0) -> None:
 
 
 def _save_dialog_window():
-    for c in W.hyprctl_json("clients"):
-        if (c.get("title") or "").strip().lower() in ("export", "save as", "save"):
-            return c
-    return None
+    return W.find_dialog(("export", "save as", "save"))
 
 
 def default_out() -> Path:
@@ -433,8 +485,15 @@ def default_out() -> Path:
 
 # --- parameter panel with scrolling ----------------------------------------
 
-F_PANEL_SCROLL = (0.93, 0.60)     # a point over the right-hand panel
+# A point over the Parameters list, from the bottom-right corner. The list
+# is what fills the panel below the fixed Customize block, so its bottom is
+# the one part of the panel that is always list; 60 % of the height was, at
+# 1440 and 1017 high, but at 705 it is the Light Color swatch and the wheel
+# scrolls nothing.
+F_PANEL_SCROLL = (-179, -100)
 PANEL_REGION = (0.68, 0.03, 0.97, 1.0)
+WHEEL_PX = 50                    # one wheel notch, on the start screen and here
+PAGE_TICKS = 8                   # most notches find_param() scrolls at once
 
 
 def _panel_region(s: Shot):
@@ -446,7 +505,7 @@ def _panel_region(s: Shot):
 def scroll_panel(ticks: int, s: Shot | None = None) -> None:
     """Wheel the right-hand panel (pointer parked over it first)."""
     s = s or shot()
-    I.scroll(ticks, *_frac(s, *F_PANEL_SCROLL), space="image", shot=s)
+    I.scroll(ticks, *_at(s, *F_PANEL_SCROLL), space="image", shot=s)
 
 
 def _find_label(s: Shot, label: str):
@@ -471,18 +530,39 @@ def _find_label(s: Shot, label: str):
     return None
 
 
+def _page_ticks(s: Shot) -> int:
+    """Notches per find_param() step: no more than the band a row is
+    accepted in, or a row can be scrolled clean past it.
+
+    That band runs from under the (fixed) "Parameters" header to 100 px
+    above the bottom. At 1440 and 1017 high it is 800+ and ~440 px, and a
+    step stays the 8 notches (400 px) it always was; at 705 high it is
+    ~125 px, and 8 notches jump every other row.
+    """
+    h = s.image.height
+    hdr = L.find_text(s, "Parameters", region=_panel_region(s))
+    top = hdr.top + hdr.height + 20 if hdr else int(h * PANEL_REGION[1])
+    return max(1, min(PAGE_TICKS, (h - 100 - top) // WHEEL_PX))
+
+
 def find_param(label: str, max_pages: int = 10):
     """Scroll the Parameters panel from the top until `label` is visible.
-    Returns (shot, Match) with the row in a safe (not edge-clipped) place."""
+    Returns (shot, Match) with the row in a safe (not edge-clipped) place.
+
+    `max_pages` counts steps of PAGE_TICKS notches; smaller steps on a short
+    window take proportionally more of them, so the reach is the same.
+    """
     s = shot()
     scroll_panel(-80, s)
     time.sleep(0.4)
-    for _ in range(max_pages):
+    s = shot()
+    ticks = _page_ticks(s)
+    for _ in range(max_pages * PAGE_TICKS // ticks):
         s = shot(f"find-{L._norm(label)}")
         m = _find_label(s, label)
-        if m and m.center[1] < s.image.height * 0.93:
+        if m and m.center[1] < s.image.height - 100:
             return s, m
-        scroll_panel(8, s)
+        scroll_panel(ticks, s)
         time.sleep(0.5)
     raise RuntimeError(f"parameter {label!r} not found in the panel")
 
@@ -490,7 +570,7 @@ def find_param(label: str, max_pages: int = 10):
 def set_param(label: str, value: float) -> Shot:
     """Scroll to a Parameters row and type `value` into its numeric box."""
     s, m = find_param(label)
-    x = int(s.image.width * F_PARAM_VALUE_X)
+    x = _at(s, F_PARAM_VALUE_X, 0)[0]
     I.click(x, m.center[1], space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
@@ -505,7 +585,7 @@ def read_param(label: str) -> str:
     """OCR the numeric box of a row (after find_param)."""
     s, m = find_param(label)
     w = s.image.width
-    box = s.crop((int(w * 0.963), m.center[1] - 14, int(w * 0.993), m.center[1] + 14))
+    box = s.crop((w - 95, m.center[1] - 14, w - 18, m.center[1] + 14))
     ms = L.all_text(box)
     return " ".join(t.text for t in ms)
 
@@ -513,8 +593,8 @@ def read_param(label: str) -> str:
 def set_color_param(label: str, hexcode: str) -> Shot:
     """Scroll to a colour row (swatch + hex box under the label) and set it."""
     s, m = find_param(label)
-    x = int(s.image.width * 0.9435)
-    I.click(x, m.center[1] + int(s.image.height * 0.0167), space="image", shot=s)
+    x = s.image.width - 145
+    I.click(x, m.center[1] + 24, space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
     I.type_text(hexcode.lstrip("#").upper())
@@ -526,8 +606,8 @@ def set_color_param(label: str, hexcode: str) -> Shot:
 def rail_icon(index: int) -> Shot:
     """Click the N-th (0-based) sub-category icon on the far-left rail."""
     s = shot()
-    x = int(s.image.width * 0.0094)
-    y = int(s.image.height * (0.0556 + 0.0347 * index))
+    x = 24
+    y = 80 + 50 * index
     I.click(x, y, space="image", shot=s)
     time.sleep(1.5)
     return shot(f"rail-{index}")
@@ -613,8 +693,7 @@ FACE_RAIL_HINT_Y = {          # image px on a 2560x1440 capture
 
 def _panel_title(s: Shot) -> str:
     return " ".join(m.text for m in L.all_text(
-        s.crop((50, int(s.image.height * 0.031), 600,
-                int(s.image.height * 0.063)))))
+        s.crop((50, 44, 600, 90))))
 
 
 def face_category(name: str) -> Shot:
@@ -625,7 +704,7 @@ def face_category(name: str) -> Shot:
     x = 24
     for y in ys:
         s = shot()
-        I.click(int(x * s.image.width / 2560), int(y * s.image.height / 1440),
+        I.click(x, y,
                 space="image", shot=s)
         time.sleep(1.2)
         s = shot(f"face-cat-{L._norm(name)}")
@@ -650,7 +729,7 @@ def hair_category(name: str) -> Shot:
     ys += [y for y in range(60, 500, 24) if y not in ys]
     for y in ys:
         s = shot()
-        I.click(int(24 * s.image.width / 2560), int(y * s.image.height / 1440),
+        I.click(24, y,
                 space="image", shot=s)
         time.sleep(1.2)
         s = shot(f"hair-cat-{L._norm(name)}")
@@ -667,11 +746,10 @@ def select_none_preset() -> Shot:
     """
     s = shot()
     for _ in range(4):
-        I.scroll(-12, int(170 * s.image.width / 2560),
-                 int(500 * s.image.height / 1440), space="image", shot=s)
+        I.scroll(-12, 170, 500, space="image", shot=s)
         time.sleep(0.25)
     s = shot()
-    I.click(int(120 * s.image.width / 2560), int(216 * s.image.height / 1440),
+    I.click(120, 216,
             space="image", shot=s)
     time.sleep(2)
     return shot("preset-none")
@@ -708,7 +786,7 @@ def save_project() -> None:
     file; the first ever save instead opens the Wine dialog (drive it like
     export_vrm does)."""
     s = shot()
-    I.click(int(29 * s.image.width / 2560), int(23 * s.image.height / 1440),
+    I.click(29, 23,
             space="image", shot=s)
     time.sleep(1.2)
     s = shot("menu")

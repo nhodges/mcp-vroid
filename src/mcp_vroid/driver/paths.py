@@ -2,7 +2,8 @@
 
 Unlike the original spike (which kept everything next to the source tree),
 an installed package must not scribble into site-packages, so every location
-is overridable by environment variable and defaults to XDG state.
+is overridable by environment variable and defaults to XDG state
+(%LOCALAPPDATA% on Windows).
 
     MCP_VROID_CAPTURES  screenshots       default $XDG_STATE_HOME/mcp-vroid/captures
     MCP_VROID_OUT       exported files    default $XDG_STATE_HOME/mcp-vroid/out
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent.parent      # .../mcp_vroid
@@ -19,7 +21,11 @@ REPO = PACKAGE.parent.parent                          # .../<checkout>  (src lay
 
 
 def _state_home() -> Path:
-    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    if os.environ.get("XDG_STATE_HOME"):
+        return Path(os.environ["XDG_STATE_HOME"])
+    if sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"])
+    return Path.home() / ".local/state"
 
 
 def _dir(env: str, default: Path) -> Path:

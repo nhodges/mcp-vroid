@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+* **Windows backend** (`driver/win32/`): EnumWindows + DWM for the window,
+  `PIL.ImageGrab` for captures, `SendInput` for pointer, wheel and keys, and
+  the common Save dialog driven as controls. Nothing to build and no new
+  dependencies. Tested on Windows 10 with VRoid Studio 2.14.0 at 1920×1080
+  and 1366×768.
+* `driver/backend.py` picks the backend for the platform
+  (`MCP_VROID_BACKEND` overrides it) and lists in `CONTRACT` what a backend
+  provides. `vroid_status` reports the backend in use.
+* `MCP_VROID_EXE` — which `VRoidStudio.exe` to launch on Windows.
+
+### Changed
+
+* UI anchors in `actions.py` are pixel offsets from a window edge instead of
+  fractions of the window, because VRoid lays its UI out in fixed pixels. At
+  2560×1440 they land within 1 px of where they did.
+* The Parameters panel is scrolled from near its bottom edge, in steps no
+  larger than the visible band, so short windows do not skip rows.
+* Captures and exports default to `%LOCALAPPDATA%\mcp-vroid` on Windows.
+
+### Fixed
+
+* OCR output is decoded as UTF-8; on a non-UTF-8 locale a single non-ASCII
+  glyph made `ocr_words()` fail.
+* `set_slider()`, `drag_slider()` and `set_hex_color()` could type into the
+  wrong row: a multi-word label matched any one of its words.
+* The VRM Settings fields are checked inside their own boxes, tolerating a
+  misread letter, instead of by a short needle anywhere on screen.
+* `vroid_launch(restart=true)` no longer shells out to `pkill` from the
+  server.
+
 ## [0.1.0] — 2026-08-24
 
 First public release.
