@@ -278,6 +278,16 @@ def _installed_exe() -> Path | None:
     return best[1] if best else None
 
 
+def kill() -> None:
+    """End VRoid Studio outright; unsaved work is lost. Only the process that
+    owns the VRoid window - another program's "VRoidStudio.exe" in its
+    command line is not a match here, as it would be for pkill -f."""
+    win = find_window()
+    if win is not None:
+        subprocess.run(["taskkill", "/PID", str(_pid(win.hwnd)), "/F"],
+                       capture_output=True)
+
+
 def launch() -> None:
     """MCP_VROID_EXE, else the newest installed VRoid Studio, else Steam."""
     exe = os.environ.get("MCP_VROID_EXE")

@@ -58,7 +58,8 @@ def helpers() -> dict:
 CONTRACT = {
     "window": ("Window", "WORKSPACE", "active_workspace", "assert_vroid_focused",
                "dismiss_screensaver", "enter", "find_dialog", "find_window",
-               "fullscreen", "is_vroid_focused", "leave", "park", "prepare"),
+               "fullscreen", "is_vroid_focused", "kill", "leave", "park",
+               "prepare"),
     "capture": ("grab_screen", "grab_window", "output_scale"),
     "input": ("clear_field", "click", "double_click", "drag", "hotkey",
               "hscroll", "key", "scroll", "type_text"),

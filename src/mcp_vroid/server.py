@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import functools
 import os
-import subprocess
 import time
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -198,8 +197,7 @@ async def vroid_launch(
     def work() -> dict[str, Any]:
         global _prev_workspace
         if restart and W.find_window():
-            subprocess.run(["pkill", "-f", "VRoidStudio.exe"],
-                           capture_output=True)
+            W.kill()
             time.sleep(5)
         win, prev = W.prepare(timeout)
         if _prev_workspace is None and prev != W.WORKSPACE:

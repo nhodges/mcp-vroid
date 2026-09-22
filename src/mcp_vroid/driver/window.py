@@ -127,6 +127,11 @@ def assert_vroid_focused() -> None:
         )
 
 
+def kill() -> None:
+    """End VRoid Studio outright; unsaved work is lost."""
+    subprocess.run(["pkill", "-f", "VRoidStudio.exe"], capture_output=True)
+
+
 def launch() -> None:
     subprocess.Popen(
         ["steam", f"steam://rungameid/{STEAM_APPID}"],
