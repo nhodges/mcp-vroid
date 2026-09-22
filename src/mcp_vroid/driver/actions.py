@@ -25,9 +25,8 @@ from .paths import OUT
 # value column keep the same distance from the right edge, and modals the
 # same distance from the centre. A fraction of the window only lands on them
 # at the size it was measured at - at 1920 wide, 0.9625 of the width falls
-# between the share icon and the kebab. Search regions and the "somewhere
-# over this panel" points (F_PANEL_SCROLL, F_VIEWPORT) stay fractions: they
-# are wide enough not to care.
+# between the share icon and the kebab. Search regions and the viewport
+# centre (F_VIEWPORT) stay fractions: they are wide enough not to care.
 F_CLOSE_X = (23, 23)       # top-left "x" that leaves a full-screen view
 F_EXPORT_ICON = (-96, 23)  # share/upload icon in the editor toolbar
 F_PARAM_VALUE_X = -55      # x of the numeric box on a Parameters row
@@ -272,9 +271,13 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
     _click_at(s, *F_EXPORT_ICON)
     time.sleep(1.5)
 
+    # The toolbar menu and the Export pill hang from the top edge at fixed
+    # heights (the pill at y ~197 whatever the window), so these bands are
+    # pixels - 20 % / 25 % of 1440. As fractions of a 705 px window the
+    # pill fell outside.
     s, m = wait_for_text("Export", timeout=15,
                          region=(int(s.image.width * 0.70), 0,
-                                 s.image.width, int(s.image.height * 0.2)))
+                                 s.image.width, 288))
     if m is None:
         raise RuntimeError("toolbar menu has no 'Export as VRM' entry")
     I.click(*m.center, space="image", shot=s)
@@ -287,7 +290,7 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
     # The primary button is white-on-blue; tesseract loses it, so match the
     # button chrome instead.
     b = L.find_button(s, region=(int(s.image.width * 0.68), 0,
-                                 s.image.width, int(s.image.height * 0.25)))
+                                 s.image.width, 360))
     if b is None:
         raise RuntimeError("no accent Export button on the export screen")
     I.click(*b.center, space="image", shot=s)
@@ -482,8 +485,15 @@ def default_out() -> Path:
 
 # --- parameter panel with scrolling ----------------------------------------
 
-F_PANEL_SCROLL = (0.93, 0.60)     # a point over the right-hand panel
+# A point over the Parameters list, from the bottom-right corner. The list
+# is what fills the panel below the fixed Customize block, so its bottom is
+# the one part of the panel that is always list; 60 % of the height was, at
+# 1440 and 1017 high, but at 705 it is the Light Color swatch and the wheel
+# scrolls nothing.
+F_PANEL_SCROLL = (-179, -100)
 PANEL_REGION = (0.68, 0.03, 0.97, 1.0)
+WHEEL_PX = 50                    # one wheel notch, on the start screen and here
+PAGE_TICKS = 8                   # most notches find_param() scrolls at once
 
 
 def _panel_region(s: Shot):
@@ -495,7 +505,7 @@ def _panel_region(s: Shot):
 def scroll_panel(ticks: int, s: Shot | None = None) -> None:
     """Wheel the right-hand panel (pointer parked over it first)."""
     s = s or shot()
-    I.scroll(ticks, *_frac(s, *F_PANEL_SCROLL), space="image", shot=s)
+    I.scroll(ticks, *_at(s, *F_PANEL_SCROLL), space="image", shot=s)
 
 
 def _find_label(s: Shot, label: str):
@@ -520,18 +530,39 @@ def _find_label(s: Shot, label: str):
     return None
 
 
+def _page_ticks(s: Shot) -> int:
+    """Notches per find_param() step: no more than the band a row is
+    accepted in, or a row can be scrolled clean past it.
+
+    That band runs from under the (fixed) "Parameters" header to 100 px
+    above the bottom. At 1440 and 1017 high it is 800+ and ~440 px, and a
+    step stays the 8 notches (400 px) it always was; at 705 high it is
+    ~125 px, and 8 notches jump every other row.
+    """
+    h = s.image.height
+    hdr = L.find_text(s, "Parameters", region=_panel_region(s))
+    top = hdr.top + hdr.height + 20 if hdr else int(h * PANEL_REGION[1])
+    return max(1, min(PAGE_TICKS, (h - 100 - top) // WHEEL_PX))
+
+
 def find_param(label: str, max_pages: int = 10):
     """Scroll the Parameters panel from the top until `label` is visible.
-    Returns (shot, Match) with the row in a safe (not edge-clipped) place."""
+    Returns (shot, Match) with the row in a safe (not edge-clipped) place.
+
+    `max_pages` counts steps of PAGE_TICKS notches; smaller steps on a short
+    window take proportionally more of them, so the reach is the same.
+    """
     s = shot()
     scroll_panel(-80, s)
     time.sleep(0.4)
-    for _ in range(max_pages):
+    s = shot()
+    ticks = _page_ticks(s)
+    for _ in range(max_pages * PAGE_TICKS // ticks):
         s = shot(f"find-{L._norm(label)}")
         m = _find_label(s, label)
         if m and m.center[1] < s.image.height - 100:
             return s, m
-        scroll_panel(8, s)
+        scroll_panel(ticks, s)
         time.sleep(0.5)
     raise RuntimeError(f"parameter {label!r} not found in the panel")
 
