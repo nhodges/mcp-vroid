@@ -94,6 +94,18 @@ def find_window() -> Window | None:
     return None
 
 
+def find_dialog(titles: tuple[str, ...]) -> dict | None:
+    """A top-level window whose title is one of `titles` (lower-case), or None.
+
+    The file dialogs VRoid opens (Wine's, under Proton) are windows of their
+    own, not part of VRoid's geometry.
+    """
+    for c in _clients():
+        if (c.get("title") or "").strip().lower() in titles:
+            return c
+    return None
+
+
 def is_vroid_focused() -> bool:
     try:
         a = hyprctl_json("activewindow")

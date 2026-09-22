@@ -8,10 +8,10 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from . import capture as C
-from . import input as I
+from .backend import capture as C
+from .backend import input as I
 from . import locate as L
-from . import window as W
+from .backend import window as W
 from .shot import Shot
 from .paths import OUT
 
@@ -421,10 +421,7 @@ def _save_dialog(out_path: Path, timeout: float = 60.0) -> None:
 
 
 def _save_dialog_window():
-    for c in W.hyprctl_json("clients"):
-        if (c.get("title") or "").strip().lower() in ("export", "save as", "save"):
-            return c
-    return None
+    return W.find_dialog(("export", "save as", "save"))
 
 
 def default_out() -> Path:

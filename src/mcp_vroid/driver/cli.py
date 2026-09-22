@@ -26,10 +26,10 @@ import sys
 from pathlib import Path
 
 from . import actions as A
-from . import capture as C
-from . import input as I
+from .backend import capture as C
+from .backend import input as I
 from . import locate as L
-from . import window as W
+from .backend import window as W
 
 
 def _region(spec: str | None):

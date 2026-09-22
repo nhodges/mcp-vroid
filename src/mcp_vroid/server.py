@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import functools
 import os
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -38,11 +37,12 @@ from .session_env import ensure_session_env
 _FILLED_ENV = ensure_session_env()
 
 from .driver import actions as A  # noqa: E402
-from .driver import capture as C  # noqa: E402
-from .driver import input as I  # noqa: E402
+from .driver import backend as B  # noqa: E402
+from .driver.backend import capture as C  # noqa: E402
+from .driver.backend import input as I  # noqa: E402
 from .driver import locate as L  # noqa: E402
-from .driver import window as W  # noqa: E402
-from .driver.paths import CAPTURES, OUT, VPOINTER  # noqa: E402
+from .driver.backend import window as W  # noqa: E402
+from .driver.paths import CAPTURES, OUT  # noqa: E402
 
 server = MCPServer(
     name="vroid",
@@ -224,8 +224,9 @@ async def vroid_status() -> dict[str, Any]:
     every acting tool will refuse until vroid_launch (or any acting tool's own
     focus step) takes the window back.
 
-    Also reports whether the external helpers this server needs are present:
-    the vpointer binary (built by native/build.sh), grim, tesseract, hyprctl.
+    Also reports which backend is driving the desktop and whether the
+    external helpers it needs are present (on Hyprland: the vpointer binary
+    built by native/build.sh, grim, tesseract, hyprctl).
     """
 
     def work() -> dict[str, Any]:
@@ -239,12 +240,8 @@ async def vroid_status() -> dict[str, Any]:
             "captures_dir": str(CAPTURES),
             "out_dir": str(OUT),
             "recovered_session_env": _FILLED_ENV,
-            "helpers": {
-                "vpointer": {"path": str(VPOINTER), "present": VPOINTER.exists()},
-                "grim": bool(shutil.which("grim")),
-                "tesseract": bool(shutil.which("tesseract")),
-                "hyprctl": bool(shutil.which("hyprctl")),
-            },
+            "backend": B.NAME,
+            "helpers": B.helpers(),
         }
         if win is not None:
             try:
