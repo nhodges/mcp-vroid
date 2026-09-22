@@ -54,9 +54,12 @@ def ocr_words(img: Image.Image | Shot, upscale: float = 2.0,
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "ocr.png"
         prepped.save(p)
+        # tesseract writes UTF-8 whatever the locale says. Left to the locale,
+        # a non-ASCII glyph in the TSV kills the reader thread on a non-UTF-8
+        # system and stdout comes back as None.
         out = subprocess.run(
             ["tesseract", str(p), "stdout", "-l", lang, "--psm", str(psm), "tsv"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
     matches: list[Match] = []
     lines = out.stdout.splitlines()
