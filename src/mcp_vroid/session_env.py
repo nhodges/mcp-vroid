@@ -15,6 +15,7 @@ full session env changes nothing here.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -35,6 +36,10 @@ def _newest(paths: list[Path]) -> Path | None:
 
 def ensure_session_env() -> dict[str, str]:
     """Fill in the missing session variables; returns what this call set."""
+    if sys.platform == "win32":
+        # No XDG runtime dir, no Wayland socket, no uid; a Windows desktop
+        # session reaches every process whatever the client passed on.
+        return {}
     filled: dict[str, str] = {}
     rd = _runtime_dir()
 
