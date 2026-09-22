@@ -9,6 +9,8 @@ Backends:
 
     hyprland   window.py / capture.py / input.py next to this file
                (hyprctl, grim, the wlr virtual pointer, XTEST)
+    win32      win32/window.py, capture.py, input.py
+               (EnumWindows + DWM, PIL.ImageGrab, SendInput)
 
 The choice follows the running platform. MCP_VROID_BACKEND overrides it,
 which is how the Hyprland modules can be imported and inspected on a
@@ -28,6 +30,8 @@ NAME = os.environ.get("MCP_VROID_BACKEND") or (
 
 if NAME == "hyprland":
     from . import capture, input, window  # noqa: F401
+elif NAME == "win32":
+    from .win32 import capture, input, window  # noqa: F401
 else:
     raise ImportError(
         f"mcp-vroid has no {NAME!r} backend "
@@ -36,6 +40,9 @@ else:
 
 def helpers() -> dict:
     """External programs this backend needs, and whether each is present."""
+    if NAME == "win32":
+        # Everything else is the Win32 API through ctypes.
+        return {"tesseract": bool(shutil.which("tesseract"))}
     from .paths import VPOINTER
     return {
         "vpointer": {"path": str(VPOINTER), "present": VPOINTER.exists()},
