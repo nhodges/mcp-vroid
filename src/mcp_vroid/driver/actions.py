@@ -12,7 +12,7 @@ from . import capture as C
 from . import input as I
 from . import locate as L
 from . import window as W
-from .capture import Shot
+from .shot import Shot
 from .paths import OUT
 
 # Anchors expressed as fractions of the captured window, so they survive a
