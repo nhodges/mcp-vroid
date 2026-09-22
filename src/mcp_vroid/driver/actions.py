@@ -387,8 +387,16 @@ def _save_dialog(out_path: Path, timeout: float = 60.0) -> None:
             break
         time.sleep(1.0)
     if win is None:
-        raise RuntimeError("Wine save dialog never appeared")
+        raise RuntimeError("save dialog never appeared")
     time.sleep(1.0)
+
+    # A backend that can drive the dialog as controls does (Windows: the
+    # common dialog, whose labels follow the display language). The rest of
+    # this function is Wine's dialog, driven by keys and checked by OCR.
+    fill = getattr(W, "fill_save_dialog", None)
+    if fill is not None:
+        fill(win, out_path)
+        return
 
     wine_path = to_wine_path(out_path)
     I.type_text(wine_path)

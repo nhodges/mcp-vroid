@@ -162,6 +162,70 @@ def find_dialog(titles: tuple[str, ...]) -> dict | None:
     return None
 
 
+WM_SETTEXT, WM_GETTEXT, WM_GETTEXTLENGTH, WM_COMMAND = 0x000C, 0x000D, 0x000E, 0x0111
+IDOK = 1
+EDT_FILE_NAME = 1001     # the file-name box of the common Save dialog
+
+user32.SendMessageW.argtypes = (wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
+user32.SendMessageW.restype = ctypes.c_ssize_t
+user32.PostMessageW.argtypes = (wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
+user32.GetDlgItem.restype = wt.HWND
+
+
+def _children(hwnd: int) -> list[int]:
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def cb(h, _):
+        found.append(h)
+        return True
+
+    user32.EnumChildWindows(hwnd, cb, 0)
+    return found
+
+
+def _control_text(hwnd: int) -> str:
+    n = user32.SendMessageW(hwnd, WM_GETTEXTLENGTH, 0, 0)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    user32.SendMessageW(hwnd, WM_GETTEXT, n + 1, ctypes.addressof(buf))
+    return buf.value
+
+
+def fill_save_dialog(dialog: dict, path) -> None:
+    """Put `path` into a Windows Save dialog and confirm it - as controls,
+    not as keystrokes and OCR.
+
+    The common dialog is made of standard controls, so the file-name box
+    can be written with WM_SETTEXT and read back with WM_GETTEXT (an exact
+    check, where OCR of a 12 px field is not), and the default button is
+    IDOK whatever the Windows display language calls it ("保存(&S)" here).
+    The address bar also carries control id 1001, hence the class check.
+
+    Raises if the box is missing, does not take the path, or the dialog is
+    still open afterwards (Windows answers a bad path with a message box of
+    its own).
+    """
+    hwnd = int(dialog["address"], 16)
+    box = next((h for h in _children(hwnd)
+                if _class(h) == "Edit" and user32.GetDlgCtrlID(h) == EDT_FILE_NAME), None)
+    if box is None:
+        raise RuntimeError("save dialog has no file-name box (Edit, id 1001)")
+    target = str(Path(path).resolve())
+    buf = ctypes.create_unicode_buffer(target)
+    user32.SendMessageW(box, WM_SETTEXT, 0, ctypes.addressof(buf))
+    got = _control_text(box)
+    if got != target:
+        raise RuntimeError(f"save dialog file-name box holds {got!r}, not {target!r}")
+    ok = user32.GetDlgItem(hwnd, IDOK)
+    user32.PostMessageW(hwnd, WM_COMMAND, IDOK, ok or 0)
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd):
+            return
+        time.sleep(0.3)
+    raise RuntimeError(f"save dialog still open after confirming {target!r}")
+
+
 def _foreground_is_vroid_process() -> bool:
     fg = user32.GetForegroundWindow()
     win = find_window()

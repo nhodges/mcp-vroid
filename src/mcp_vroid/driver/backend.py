@@ -63,3 +63,10 @@ CONTRACT = {
     "input": ("clear_field", "click", "double_click", "drag", "hotkey",
               "hscroll", "key", "scroll", "type_text"),
 }
+
+# Used when present, with a fallback in the caller when not.
+#   window.fill_save_dialog(dialog, path)   actions._save_dialog(): drive the
+#       file dialog as controls instead of typing into it and OCR-checking.
+OPTIONAL = {
+    "window": ("fill_save_dialog",),
+}
