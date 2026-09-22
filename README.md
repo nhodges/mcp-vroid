@@ -1,6 +1,6 @@
 # mcp-vroid
 
-**Drive VRoid Studio from any MCP client, on Linux/Wayland.** Launch the app,
+**Drive VRoid Studio from any MCP client, on Linux/Wayland or Windows.** Launch the app,
 look at it, find widgets in the picture, click and type, set parameters, and
 export a `.vrm` — all as MCP tools.
 
@@ -10,7 +10,8 @@ VRoid Studio has no scripting API, no CLI, no plugin surface. The only way in
 is the one a person uses: look at the window and move the mouse. So that is
 what this does — screenshot the window with `grim`, locate things with OCR and
 colour matching, and inject real pointer and keyboard events at the compositor
-level. The MCP client's model is the eyes; these tools are the hands.
+level. The MCP client's model is the eyes; these tools are the hands. On
+Windows the same loop runs on `PIL.ImageGrab` and `SendInput`.
 
 ```
    grim ──► PNG ──► tesseract / cv2 ──► (x, y) ──► virtual pointer / XTEST
@@ -40,6 +41,8 @@ walks the whole flow, including Wine's save dialog):
 
 ## Requirements
 
+### Linux (Hyprland)
+
 Developed and tested on **Arch Linux + Hyprland**, with VRoid Studio 2.14.0
 (English UI) running under **Steam/Proton**. What is actually load-bearing:
 
@@ -61,6 +64,26 @@ for window management. On Arch:
 sudo pacman -S grim tesseract tesseract-data-eng wayland gcc pkgconf
 ```
 
+### Windows
+
+Tested on **Windows 10** (22H2) with VRoid Studio 2.14.0 installed from the
+[official site](https://vroid.com/en/studio), English UI, at 1920 × 1080 and
+1366 × 768 and 100 % display scale.
+
+| | needed for | notes |
+|---|---|---|
+| **VRoid Studio** 2.x | the app being driven | found from its installer's uninstall entry (the newest version wins), or set `MCP_VROID_EXE`; Steam is the last resort |
+| `tesseract` + `eng` traineddata, on `PATH` | OCR | `winget install --id tesseract-ocr.tesseract -e`, then make sure `C:\Program Files\Tesseract-OCR` is on `PATH` (`tesseract --version` in a new terminal) |
+| Python **3.11+** and [`uv`](https://docs.astral.sh/uv/) | the server itself | `uv` fetches a suitable Python on its own |
+
+Nothing to build: window, capture and input are the Win32 API through
+`ctypes`, and the screenshots use the Pillow the package already depends on.
+
+The UI must be English. If *Settings → Language* will not switch it, the
+setting is `<LanguageMode>` in
+`%USERPROFILE%\AppData\LocalLow\pixiv\VRoid Studio\preferences\editoroption.xml`;
+with VRoid closed, change `Ja` to `En`.
+
 ## Quickstart
 
 ```bash
@@ -74,6 +97,7 @@ bash native/build.sh    # builds native/vpointer  <-- REQUIRED, not optional
 virtual-pointer protocol (the protocol XML is vendored under
 `native/protocols/`). Without it every pointer tool fails with
 `native/vpointer missing`; `vroid_status` tells you whether it is there.
+**On Windows, skip it** — there is nothing to build.
 
 Register it with Claude Code:
 
@@ -102,16 +126,19 @@ recovers `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`
 and `DISPLAY` from the runtime dir at startup
 (`src/mcp_vroid/session_env.py`), so `hyprctl` / `grim` / XTEST work anyway.
 `vroid_status` reports what it had to fill in; anything already in the
-environment wins.
+environment wins. (On Windows there is no such environment and this step
+does nothing.)
 
 Optional environment variables:
 
 | var | default | meaning |
 |---|---|---|
-| `MCP_VROID_CAPTURES` | `$XDG_STATE_HOME/mcp-vroid/captures` | where screenshots are written |
-| `MCP_VROID_OUT` | `$XDG_STATE_HOME/mcp-vroid/out` | default dir for exports/saves |
-| `MCP_VROID_VPOINTER` | `<checkout>/native/vpointer` | path to the pointer helper |
+| `MCP_VROID_CAPTURES` | `$XDG_STATE_HOME/mcp-vroid/captures` (Windows: `%LOCALAPPDATA%\mcp-vroid\captures`) | where screenshots are written |
+| `MCP_VROID_OUT` | `$XDG_STATE_HOME/mcp-vroid/out` (Windows: `%LOCALAPPDATA%\mcp-vroid\out`) | default dir for exports/saves |
+| `MCP_VROID_VPOINTER` | `<checkout>/native/vpointer` | path to the pointer helper (Linux) |
 | `MCP_VROID_MAX_IMAGE_PX` | `1600` | longest edge of images sent to the client (0 = never downscale) |
+| `MCP_VROID_EXE` | — | path to `VRoidStudio.exe` (Windows); otherwise the newest installed one |
+| `MCP_VROID_BACKEND` | from the platform | `hyprland` or `win32`; overriding it is for development |
 
 ## Tools
 
@@ -121,15 +148,15 @@ Optional environment variables:
 
 | tool | what it does |
 |---|---|
-| `vroid_launch(restart=false, timeout=240)` | Start VRoid via Steam if needed, park it on Hyprland workspace 9, remember the workspace you were on, focus + fullscreen it. `restart=true` kills the running instance first — unsaved work is lost. |
-| `vroid_status()` | Window present/focused/title/geometry, active workspace, capture dirs, and whether `vpointer`/`grim`/`tesseract`/`hyprctl` are available. Read-only, no OCR. |
-| `vroid_release()` | Switch back to the workspace the user was on. VRoid keeps running on ws 9. |
+| `vroid_launch(restart=false, timeout=240)` | Start VRoid via Steam if needed, park it on Hyprland workspace 9, remember the workspace you were on, focus + fullscreen it. On Windows: start `MCP_VROID_EXE` or the newest installed VRoid, remember the window in front, focus + maximise it. `restart=true` kills the running instance first — unsaved work is lost. |
+| `vroid_status()` | Window present/focused/title/geometry, active workspace, capture dirs, the backend in use and whether its helpers (`vpointer`/`grim`/`tesseract`/`hyprctl`; on Windows `tesseract`) are available. Read-only, no OCR. |
+| `vroid_release()` | Switch back to the workspace the user was on (on Windows, the window). VRoid keeps running. |
 
 **Seeing**
 
 | tool | what it does |
 |---|---|
-| `vroid_screenshot(region?, tag?, whole_screen?, full_resolution?)` | Capture the window (or the whole output, for the Wine save dialog), save it, and return it as MCP image content for the client's model to look at. Reports native size and the downscale factor applied for transport. |
+| `vroid_screenshot(region?, tag?, whole_screen?, full_resolution?)` | Capture the window (or the whole output, for Wine's save dialog on Linux), save it, and return it as MCP image content for the client's model to look at. Reports native size and the downscale factor applied for transport. |
 | `vroid_find_text(query, region?, exact?, limit?)` | Fresh capture + tesseract; returns matching word boxes and centres in image px. Pass `region` — full-frame OCR takes ~10 s, a panel ~2 s. |
 | `vroid_find_button(color='primary'\|'disabled', label?, region?)` | Finds VRoid's solid `#0096FA` pills by colour, because tesseract loses white-on-blue labels. A grey pill means *disabled*. |
 | `vroid_current_screen()` | `start` / `editor` / `export_vrm` / `hair_editor` / `unknown`. |
@@ -140,8 +167,8 @@ Optional environment variables:
 |---|---|
 | `vroid_click(x, y, space='image', button='left', double=false)` | Glides the pointer in a few steps (so hover states fire) and clicks. |
 | `vroid_drag(x1, y1, x2, y2, space='image', button='left')` | Press → 24-step glide → release. Right-drag orbits the camera, middle-drag pans. |
-| `vroid_scroll(dy, dx=0, x?, y?, space='image')` | Wheel, as X11 buttons 4/5 (6/7 horizontal). Park the pointer over the panel you mean to scroll. |
-| `vroid_type(text, clear_first=false)` | Types into the focused widget over XTEST. |
+| `vroid_scroll(dy, dx=0, x?, y?, space='image')` | Wheel, as X11 buttons 4/5 (6/7 horizontal); SendInput's wheel on Windows. Park the pointer over the panel you mean to scroll. |
+| `vroid_type(text, clear_first=false)` | Types into the focused widget over XTEST; on Windows as Unicode through SendInput, past a switched-on IME. |
 | `vroid_key(combo, times=1)` | `Return`, `Escape`, `ctrl+s`, `ctrl+shift+s`, … |
 
 **Acting — flows**
@@ -152,7 +179,7 @@ Optional environment variables:
 | `vroid_open_tab(name)` | Face / Hairstyle / Body / Outfit / Accessories / Look. |
 | `vroid_set_slider(label, value)` | Scrolls the Parameters panel to the row and types an exact value into its numeric box. |
 | `vroid_set_color(label, hex)` | Same, for a `#RRGGBB` colour box. |
-| `vroid_export_vrm(path, avatar_name, creator, version='1.0')` | The whole Export-as-VRM walk, including the VRM Settings metadata modal and Wine's save dialog. `version` picks VRM1.0 or VRM0.0. |
+| `vroid_export_vrm(path, avatar_name, creator, version='1.0')` | The whole Export-as-VRM walk, including the VRM Settings metadata modal and the save dialog (Wine's on Linux; on Windows the common dialog, filled as controls). `version` picks VRM1.0 or VRM0.0. |
 | `vroid_save_project(name?)` | Ctrl+Shift+S to an explicit `.vroid` path, or a plain Save with no argument. |
 
 Every acting tool focuses VRoid first and **refuses to act if the focused
@@ -197,6 +224,27 @@ internally, so `vroid_find_text` output can be handed straight to
 shown, multiply coordinates read off it by the inverse of the reported
 `downscale` — or just ask `vroid_find_text`, which always reports native px.
 
+**On Windows** the same loop runs on different parts (`driver/win32/`, picked
+by `driver/backend.py`):
+
+* *Seeing* is `PIL.ImageGrab` on VRoid's **client area** — the window minus
+  its title bar, which is what Hyprland's fullscreen shows, so the same
+  anchors apply.
+* *Acting* is one path, `SendInput`, for pointer, wheel and keys: VRoid is
+  native here, so none of the Proton workarounds are needed. Text goes in as
+  Unicode characters (deriving virtual keys from characters breaks on a
+  Japanese keyboard layout, where `.` comes back as `Z`); named keys use
+  virtual keys.
+* *Coordinates* are physical screen pixels: the process declares per-monitor
+  DPI awareness, so window rectangles, captures and `SendInput` agree and a
+  capture's scale is 1.0.
+* *Focus* — Windows refuses `SetForegroundWindow` to a background process;
+  Alt is held across the call. "Focused" means the foreground window belongs
+  to VRoid's process, so its own file dialogs count and nothing else does.
+* *The save dialog* is the common file dialog: the path is written into its
+  file-name box and read back, then `IDOK` is sent — no OCR, whatever the
+  display language.
+
 Rules of thumb, learned the hard way:
 
 * **Read the whole frame, not a crop.** A "Close Hairstyle Editor" confirm
@@ -220,20 +268,28 @@ This is GUI automation with no API underneath. Be realistic about it:
   letter-spaced or light-on-dark labels get split or dropped (`Export` →
   `E` + `xport`). White-on-blue is lost entirely, which is why
   `vroid_find_button` exists. Icons have no text at all — those anchors are
-  hard-coded fractions of the window.
-* **Coupled to the UI version.** Needles and fractional anchors were
-  calibrated on VRoid Studio 2.14.0, English, at 2560×1440 / scale 1.25. A
-  pixiv UI reflow, another language, or a different monitor can require
-  re-measuring. (Japanese UI → kebab `⋮` → Settings → Language.)
+  hard-coded pixel offsets from a window edge.
+* **Coupled to the UI version.** Needles and anchors were calibrated on
+  VRoid Studio 2.14.0, English, at 2560×1440 / scale 1.25. VRoid places its
+  UI in fixed pixels from the window's edges, and the anchors are written
+  that way, so another window size is fine — checked at 1920×1017 and
+  1366×705 on Windows. A pixiv UI reflow, another language, or a display/UI
+  scale other than 100 % can still require re-measuring. (Japanese UI →
+  kebab `⋮` → Settings → Language.)
 * **Modals appear outside your search region** and swallow clicks silently.
 * **Timing is guessed.** The 3D viewport takes ~5 s after a base is chosen;
   export takes 5–30 s, longer for heavy models.
 * **The Wine save dialog is a separate window** with its own class and
-  geometry — use `vroid_screenshot(whole_screen=true)` there.
+  geometry — use `vroid_screenshot(whole_screen=true)` there. (On Windows the
+  dialog is driven as controls and never needs looking at.)
 * **Single instance, single session.** One VRoid window, one desktop, no
-  headless mode, no parallelism. It drives *your* screen.
+  headless mode, no parallelism. It drives *your* screen. On Windows there is
+  no workspace to park VRoid on: while a session runs, the real cursor and
+  keyboard are VRoid's.
 * **The idle screensaver** can grab the session mid-run. The guard refuses to
   type into it and closes that one window (and only that one) before acting.
+  A locked Windows session cannot be unlocked from here; the guard just
+  refuses.
 * **Attended use is recommended.** See below.
 
 ## Security
@@ -271,12 +327,15 @@ Layout:
 
 ```
 src/mcp_vroid/server.py       MCP tool definitions (stdio)
-src/mcp_vroid/session_env.py  recovers the Wayland/X session env
+src/mcp_vroid/session_env.py  recovers the Wayland/X session env (Linux)
 src/mcp_vroid/driver/         the engine
+  backend.py                  picks window/capture/input for the platform; CONTRACT
   window.py                   hyprctl: find / launch / focus / workspaces   <- Hyprland-specific
   capture.py                  grim + coordinate spaces
-  locate.py                   tesseract OCR + colour button matching
   input.py                    vpointer (Wayland) + XTEST (X11)
+  win32/                      the Windows backend: window.py, capture.py, input.py
+  shot.py                     a capture and its coordinate mapping (shared)
+  locate.py                   tesseract OCR + colour button matching
   actions.py                  the VRoid-specific flows
 native/vpointer.c             zwlr_virtual_pointer client
 ```
@@ -287,11 +346,12 @@ Issues and PRs welcome. Useful things to bring:
 
 * **A port to another wlroots compositor.** Only `driver/window.py` is
   Hyprland-specific; the rest already works anywhere `grim` and
-  `zwlr_virtual_pointer` do.
-* **Anchors for other resolutions or DPI scales**, or for the Japanese UI.
-* **Bug reports** — include your compositor, VRoid Studio version, monitor
-  resolution and scale, and the output of `vroid_status`. A capture from the
-  failing step helps enormously.
+  `zwlr_virtual_pointer` do. A backend for another desktop provides what
+  `backend.CONTRACT` lists.
+* **Anchors for other DPI or UI scales**, or for the Japanese UI.
+* **Bug reports** — include your OS and compositor, VRoid Studio version,
+  monitor resolution and scale, and the output of `vroid_status`. A capture
+  from the failing step helps enormously.
 
 Nothing here is auto-formatted or linted by CI; match the surrounding style.
 

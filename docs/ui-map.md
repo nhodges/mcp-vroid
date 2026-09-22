@@ -5,9 +5,18 @@ VRoid Studio **2.14.0**, English UI, captured fullscreen at **2560 × 1440**
 px** — the space `vroid_click` and `vroid_find_text` use by default.
 
 Treat every number as a *hint*. The tools locate by OCR and colour first and
-fall back to these anchors only for things that have no text (icons). On
-another resolution or DPI scale, the fractional anchors will need
-re-measuring.
+fall back to these anchors only for things that have no text (icons).
+
+**VRoid lays its UI out in fixed pixels from the window's edges**, not in
+proportion to the window. Measured again on Windows at 1920 × 1017 and
+1366 × 705 (client area, VRoid 2.14.0, 100 % scale): the tabs, the left rail,
+the hamburger and the `Create New` card sit at the same pixel positions as
+below; the toolbar icons and the Parameters value column keep the same
+distance from the right edge (share icon 96 px, value box 55 px); the base
+chooser and VRM Settings keep the same distance from the centre. So read a
+right-hand coordinate below as "this far from the right edge"; the anchors in
+`actions.py` are written that way (`x < 0` counts from the right). A display
+or UI scale other than 100 % has not been measured.
 
 ## Start screen
 
@@ -46,7 +55,7 @@ Tab strip at y ≈ 23:
 
 | control | drive it by |
 |---|---|
-| slider | the numeric box at x ≈ 2505 (`vroid_set_slider`); the track spans x ≈ 2278 → 2516 with 0.0 centred |
+| slider | the numeric box at x ≈ 2505, i.e. 55 px from the right edge (`vroid_set_slider`); the track spans x ≈ 2278 → 2516 with 0.0 centred |
 | colour | the `#RRGGBB` box at x ≈ 2450 (`vroid_set_color`) |
 | checkbox / radio | click the square/circle |
 | accordion | click the caption (e.g. `> Reduce Polygons`) |
@@ -63,6 +72,12 @@ Tab strip at y ≈ 23:
 `Rotate Eye Socket`, `Inner/Outer Eye Slant`, `Iris Size X/Y`, `Gaze (Y)`, …
 
 `vroid_set_slider` scrolls the panel to find the row for you.
+
+On the Body tab the `Parameters` header (y ≈ 459) stays put and only the list
+below it scrolls, 50 px per wheel notch, with the pointer over the list. On a
+short window that list is a narrow band — about 125 px of it usable at
+1366 × 705 — so the panel is scrolled from near its bottom edge, a few
+notches at a time.
 
 ## Hair editor
 
@@ -93,9 +108,13 @@ modal offering `Save as new item` / `Overwrite` / `Close without saving`.
 
    The Export pill stays **grey and dead** until both required fields are
    filled — `vroid_find_button(color='disabled')` will tell you so.
-4. **Wine save dialog** — its own window, title `Export`. The `File name:`
-   field opens focused and selected, so typing a Windows path replaces it and
-   Return fires the default button.
+   **Escape does not close this modal**; a click outside it does.
+4. **Save dialog** — its own window, title `Export` (`Save` for Save As).
+
+### On Linux: Wine's dialog
+
+The `File name:` field opens focused and selected, so typing a Windows path
+replaces it and Return fires the default button.
 
 Two traps here:
 
@@ -106,3 +125,14 @@ Two traps here:
 
 Use `vroid_screenshot(whole_screen=true)` while the Wine dialog is up — it is
 not a child of the VRoid window and is not inside its geometry.
+
+### On Windows: the common file dialog
+
+Class `#32770`, owned by VRoid's process, opening near the top-left of
+VRoid's monitor. Its labels follow the **Windows display language** (on a
+Japanese system the button is `保存(&S)`), so nothing in it is located by OCR.
+The file-name box is an `Edit` with control id 1001 (the address bar is also
+1001, as a toolbar) and the default button is `IDOK`: `vroid_export_vrm` and
+`vroid_save_project` write the path into the box, read it back, and send
+`IDOK`. The dialog is never screenshotted — which also keeps the folder
+listing it shows out of the captures.
