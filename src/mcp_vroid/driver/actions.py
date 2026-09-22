@@ -15,12 +15,24 @@ from .backend import window as W
 from .shot import Shot
 from .paths import OUT
 
-# Anchors expressed as fractions of the captured window, so they survive a
-# different monitor/scale. Measured on 2560x1440 (Hyprland scale 1.25).
-F_CLOSE_X = (0.0090, 0.0160)      # top-left "x" that leaves a full-screen view
-F_EXPORT_ICON = (0.9625, 0.0160)  # share/upload icon in the editor toolbar
-F_PARAM_VALUE_X = 0.9785          # x of the numeric box on a Parameters row
-TAB_Y = 0.0160                    # y of the Face/Hairstyle/... tab strip
+# Anchors are image pixels from a window edge: x >= 0 counts from the left,
+# x < 0 from the right (y likewise from the top / bottom). Measured on
+# 2560x1440 (Hyprland scale 1.25).
+#
+# VRoid lays its UI out in fixed pixels, not in proportion to the window:
+# at 1920x1017 the tabs, the left rail and the close box sit at the same
+# pixel positions as at 2560x1440, the toolbar icons and the Parameters
+# value column keep the same distance from the right edge, and modals the
+# same distance from the centre. A fraction of the window only lands on them
+# at the size it was measured at - at 1920 wide, 0.9625 of the width falls
+# between the share icon and the kebab. Search regions and the "somewhere
+# over this panel" points (F_PANEL_SCROLL, F_VIEWPORT) stay fractions: they
+# are wide enough not to care.
+F_CLOSE_X = (23, 23)       # top-left "x" that leaves a full-screen view
+F_EXPORT_ICON = (-96, 23)  # share/upload icon in the editor toolbar
+F_PARAM_VALUE_X = -55      # x of the numeric box on a Parameters row
+TAB_Y = 23                 # y of the Face/Hairstyle/... tab strip
+TAB_STRIP_H = 57           # the tab labels are all above this line
 
 TABS = ("Face", "Hairstyle", "Body", "Outfit", "Accessories", "Look")
 
@@ -33,8 +45,14 @@ def _frac(s: Shot, fx: float, fy: float) -> tuple[int, int]:
     return int(s.image.width * fx), int(s.image.height * fy)
 
 
-def _click_frac(s: Shot, fx: float, fy: float, **kw) -> None:
-    I.click(*_frac(s, fx, fy), space="image", shot=s, **kw)
+def _at(s: Shot, x: int, y: int) -> tuple[int, int]:
+    """An edge-relative anchor (see above) placed on this capture."""
+    w, h = s.image.width, s.image.height
+    return (x if x >= 0 else w + x, y if y >= 0 else h + y)
+
+
+def _click_at(s: Shot, x: int, y: int, **kw) -> None:
+    I.click(*_at(s, x, y), space="image", shot=s, **kw)
 
 
 def wait_for(pred, timeout: float = 30.0, poll: float = 1.0, tag: str = ""):
@@ -60,7 +78,7 @@ def wait_for_text(needle: str, timeout: float = 30.0, region=None, **kw):
 def current_screen(s: Shot | None = None) -> str:
     """One of: start, editor, export_vrm, hair_editor, unknown."""
     s = s or shot()
-    top = s.crop((0, 0, s.image.width, int(s.image.height * 0.05)))
+    top = s.crop((0, 0, s.image.width, 72))
     words = {L._norm(m.text) for m in L.all_text(top)}
     if {"vroidediting", "vroid"} & words or "recentlyedited" in words:
         return "start"
@@ -86,7 +104,7 @@ def new_character(base: str = "Fem", timeout: float = 60.0) -> Shot:
     if m is None:
         raise RuntimeError("no 'Create New' tile - not on the start screen?")
     # the "+" card sits directly above its caption
-    I.click(m.center[0], m.center[1] - int(0.076 * s.image.height),
+    I.click(m.center[0], m.center[1] - 109,
             space="image", shot=s)
     time.sleep(1.5)
 
@@ -94,7 +112,7 @@ def new_character(base: str = "Fem", timeout: float = 60.0) -> Shot:
     if m is None:
         raise RuntimeError(f"base chooser never offered {base!r}")
     # the thumbnail sits above its label
-    I.click(m.center[0], m.center[1] - int(0.07 * s.image.height),
+    I.click(m.center[0], m.center[1] - 100,
             space="image", shot=s)
 
     s, ok = wait_for(lambda sh: current_screen(sh) == "editor",
@@ -110,7 +128,7 @@ def new_character(base: str = "Fem", timeout: float = 60.0) -> Shot:
 def open_tab(name: str) -> Shot:
     s = shot()
     m = L.find_text(s, name, region=(0, 0, int(s.image.width * 0.4),
-                                     int(s.image.height * 0.04)))
+                                     TAB_STRIP_H))
     if m is None:
         raise RuntimeError(f"tab {name!r} not found in the tab strip")
     I.click(*m.center, space="image", shot=s)
@@ -140,7 +158,7 @@ def set_slider(label: str, value: float, s: Shot | None = None) -> Shot:
     s, m = find_param_row(label, s)
     if m is None:
         raise RuntimeError(f"no parameter row labelled {label!r}")
-    x = int(s.image.width * F_PARAM_VALUE_X)
+    x = _at(s, F_PARAM_VALUE_X, 0)[0]
     I.click(x, m.center[1], space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
@@ -156,8 +174,8 @@ def drag_slider(label: str, fraction: float, s: Shot | None = None) -> Shot:
     if m is None:
         raise RuntimeError(f"no parameter row labelled {label!r}")
     w = s.image.width
-    x0, x1 = int(w * 0.8900), int(w * 0.9830)   # track ends, measured
-    y = m.center[1] + int(s.image.height * 0.0167)
+    x0, x1 = w - 282, w - 44   # track ends, measured
+    y = m.center[1] + 24
     handle = L.find_color_blobs(s, min_w=8, min_h=8,
                                 region=(x0 - 20, y - 12, x1 + 20, y + 12))
     start_x = handle[0].center[0] if handle else (x0 + x1) // 2
@@ -171,8 +189,8 @@ def set_hex_color(label: str, hexcode: str) -> Shot:
     s, m = find_param_row(label, None)
     if m is None:
         raise RuntimeError(f"no colour row labelled {label!r}")
-    x = int(s.image.width * 0.9435)
-    I.click(x, m.center[1] + int(s.image.height * 0.0167),
+    x = s.image.width - 145
+    I.click(x, m.center[1] + 24,
             space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
@@ -187,8 +205,8 @@ def open_hair_editor(part: str = "Front") -> Shot:
     open_tab("Hairstyle")
     s = shot()
     # rail icons run down the far left; index 1 is the first hair part
-    rail_x = int(s.image.width * 0.0094)
-    rail_y = int(s.image.height * 0.0861)   # 2nd icon
+    rail_x = 24
+    rail_y = 124   # 2nd icon
     I.click(rail_x, rail_y, space="image", shot=s)
     time.sleep(1.5)
 
@@ -221,7 +239,7 @@ def open_hair_editor(part: str = "Front") -> Shot:
 
 def close_hair_editor(save: bool = False) -> Shot:
     s = shot()
-    _click_frac(s, *F_CLOSE_X)
+    _click_at(s, *F_CLOSE_X)
     time.sleep(1.5)
     s, m = wait_for_text("Close Hairstyle Editor", timeout=10)
     if m:
@@ -251,7 +269,7 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
         out_path.unlink()
 
     s = shot("editor-before-export")
-    _click_frac(s, *F_EXPORT_ICON)
+    _click_at(s, *F_EXPORT_ICON)
     time.sleep(1.5)
 
     s, m = wait_for_text("Export", timeout=15,
@@ -288,9 +306,9 @@ def export_vrm(out_path: str | Path, avatar_name: str = "SpikeAvatar",
     for _ in range(8):
         I.scroll(10, cx, cy, space="image", shot=s)
         s = shot("vrm-settings-scroll")
-        b = L.find_button(s, region=(int(s.image.width * 0.38),
+        b = L.find_button(s, region=(s.image.width // 2 - 307,
                                      int(s.image.height * 0.2),
-                                     int(s.image.width * 0.63),
+                                     s.image.width // 2 + 333,
                                      s.image.height))
         if b:
             break
@@ -329,7 +347,7 @@ def select_export_format(version: str = "1.0") -> None:
     m = L.find_text(s, "VRM0.0") or L.find_text(s, "VRMO.0")
     if m is None:
         raise RuntimeError("no VRM0.0 radio in the VRM Settings modal")
-    I.click(m.left - int(s.image.width * 0.008), m.center[1],
+    I.click(m.left - 20, m.center[1],
             space="image", shot=s)
     time.sleep(0.6)
 
@@ -348,13 +366,13 @@ def _fill_vrm_settings(avatar_name: str, creators: str) -> None:
             int(s.image.width * 0.30), 0, int(s.image.width * 0.70),
             int(s.image.height * 0.35)))
         cx = title.center[0] if title else s.image.width // 2
-        region = (int(s.image.width * 0.36), 0, int(s.image.width * 0.64),
+        region = (s.image.width // 2 - 358, 0, s.image.width // 2 + 358,
                   s.image.height)
         hits = L.find_text(s, word, exact=True, all_matches=True, region=region)
         if not hits:
             raise RuntimeError(f"VRM Settings has no {word!r} caption")
         m = min(hits, key=lambda h: h.top)      # topmost = the caption we want
-        I.click(cx, m.center[1] + int(s.image.height * 0.0271),
+        I.click(cx, m.center[1] + 39,
                 space="image", shot=s)
         time.sleep(0.3)
         I.clear_field()
@@ -490,7 +508,7 @@ def find_param(label: str, max_pages: int = 10):
     for _ in range(max_pages):
         s = shot(f"find-{L._norm(label)}")
         m = _find_label(s, label)
-        if m and m.center[1] < s.image.height * 0.93:
+        if m and m.center[1] < s.image.height - 100:
             return s, m
         scroll_panel(8, s)
         time.sleep(0.5)
@@ -500,7 +518,7 @@ def find_param(label: str, max_pages: int = 10):
 def set_param(label: str, value: float) -> Shot:
     """Scroll to a Parameters row and type `value` into its numeric box."""
     s, m = find_param(label)
-    x = int(s.image.width * F_PARAM_VALUE_X)
+    x = _at(s, F_PARAM_VALUE_X, 0)[0]
     I.click(x, m.center[1], space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
@@ -515,7 +533,7 @@ def read_param(label: str) -> str:
     """OCR the numeric box of a row (after find_param)."""
     s, m = find_param(label)
     w = s.image.width
-    box = s.crop((int(w * 0.963), m.center[1] - 14, int(w * 0.993), m.center[1] + 14))
+    box = s.crop((w - 95, m.center[1] - 14, w - 18, m.center[1] + 14))
     ms = L.all_text(box)
     return " ".join(t.text for t in ms)
 
@@ -523,8 +541,8 @@ def read_param(label: str) -> str:
 def set_color_param(label: str, hexcode: str) -> Shot:
     """Scroll to a colour row (swatch + hex box under the label) and set it."""
     s, m = find_param(label)
-    x = int(s.image.width * 0.9435)
-    I.click(x, m.center[1] + int(s.image.height * 0.0167), space="image", shot=s)
+    x = s.image.width - 145
+    I.click(x, m.center[1] + 24, space="image", shot=s)
     time.sleep(0.3)
     I.clear_field()
     I.type_text(hexcode.lstrip("#").upper())
@@ -536,8 +554,8 @@ def set_color_param(label: str, hexcode: str) -> Shot:
 def rail_icon(index: int) -> Shot:
     """Click the N-th (0-based) sub-category icon on the far-left rail."""
     s = shot()
-    x = int(s.image.width * 0.0094)
-    y = int(s.image.height * (0.0556 + 0.0347 * index))
+    x = 24
+    y = 80 + 50 * index
     I.click(x, y, space="image", shot=s)
     time.sleep(1.5)
     return shot(f"rail-{index}")
@@ -623,8 +641,7 @@ FACE_RAIL_HINT_Y = {          # image px on a 2560x1440 capture
 
 def _panel_title(s: Shot) -> str:
     return " ".join(m.text for m in L.all_text(
-        s.crop((50, int(s.image.height * 0.031), 600,
-                int(s.image.height * 0.063)))))
+        s.crop((50, 44, 600, 90))))
 
 
 def face_category(name: str) -> Shot:
@@ -635,7 +652,7 @@ def face_category(name: str) -> Shot:
     x = 24
     for y in ys:
         s = shot()
-        I.click(int(x * s.image.width / 2560), int(y * s.image.height / 1440),
+        I.click(x, y,
                 space="image", shot=s)
         time.sleep(1.2)
         s = shot(f"face-cat-{L._norm(name)}")
@@ -660,7 +677,7 @@ def hair_category(name: str) -> Shot:
     ys += [y for y in range(60, 500, 24) if y not in ys]
     for y in ys:
         s = shot()
-        I.click(int(24 * s.image.width / 2560), int(y * s.image.height / 1440),
+        I.click(24, y,
                 space="image", shot=s)
         time.sleep(1.2)
         s = shot(f"hair-cat-{L._norm(name)}")
@@ -677,11 +694,10 @@ def select_none_preset() -> Shot:
     """
     s = shot()
     for _ in range(4):
-        I.scroll(-12, int(170 * s.image.width / 2560),
-                 int(500 * s.image.height / 1440), space="image", shot=s)
+        I.scroll(-12, 170, 500, space="image", shot=s)
         time.sleep(0.25)
     s = shot()
-    I.click(int(120 * s.image.width / 2560), int(216 * s.image.height / 1440),
+    I.click(120, 216,
             space="image", shot=s)
     time.sleep(2)
     return shot("preset-none")
@@ -718,7 +734,7 @@ def save_project() -> None:
     file; the first ever save instead opens the Wine dialog (drive it like
     export_vrm does)."""
     s = shot()
-    I.click(int(29 * s.image.width / 2560), int(23 * s.image.height / 1440),
+    I.click(29, 23,
             space="image", shot=s)
     time.sleep(1.2)
     s = shot("menu")
