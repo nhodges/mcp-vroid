@@ -119,10 +119,15 @@ def open_tab(name: str) -> Shot:
 
 
 def find_param_row(label: str, s: Shot | None = None):
-    """(shot, Match) for a Parameters label in the right-hand panel."""
+    """(shot, Match) for a Parameters label in the right-hand panel.
+
+    Same matching as find_param(), without the scrolling. A plain
+    find_text() takes any one word of a multi-word label, so "Head Size"
+    could resolve to the "Size" of "Body Size" and the value be typed
+    into the wrong row.
+    """
     s = s or shot()
-    region = (int(s.image.width * 0.68), 0, s.image.width, s.image.height)
-    return s, L.find_text(s, label, region=region)
+    return s, _find_label(s, label)
 
 
 def set_slider(label: str, value: float, s: Shot | None = None) -> Shot:
