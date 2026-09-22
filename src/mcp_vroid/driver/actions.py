@@ -360,6 +360,7 @@ def _fill_vrm_settings(avatar_name: str, creators: str) -> None:
     "Creator" also hits "Creator Copyright" - both of which silently type into
     the wrong box and leave Export greyed out.
     """
+    field_y: dict[str, int] = {}
     for word, text in (("Name", avatar_name), ("Creators", creators)):
         s = shot(f"vrm-field-{word.lower()}")
         title = L.find_text(s, "Settings", region=(
@@ -372,18 +373,38 @@ def _fill_vrm_settings(avatar_name: str, creators: str) -> None:
         if not hits:
             raise RuntimeError(f"VRM Settings has no {word!r} caption")
         m = min(hits, key=lambda h: h.top)      # topmost = the caption we want
-        I.click(cx, m.center[1] + 39,
+        field_y[word] = m.center[1] + 39
+        I.click(cx, field_y[word],
                 space="image", shot=s)
         time.sleep(0.3)
         I.clear_field()
         I.type_text(text)
         time.sleep(0.4)
 
+    # Read each field back from inside its own box. Searching the whole
+    # screen for the text's first hyphen-separated piece ("mcp" of
+    # "mcp-vroid") failed on one misread letter and could pass on the same
+    # word anywhere else. The crop stays inside the box - the blue border of
+    # the focused field, taken in, makes tesseract drop the text entirely -
+    # and is placed from the modal's centre, not from the caption: the
+    # caption match for "Avatar Name" is the word "Name", which starts
+    # halfway along the field.
     s = shot("vrm-fields-filled")
     for word, text in (("Name", avatar_name), ("Creators", creators)):
-        if not L.find_text(s, text.split("-")[0][:8]):
+        y = field_y[word]
+        box = s.crop((s.image.width // 2 - 246, y - 14,
+                      s.image.width // 2 + 230, y + 14))
+        got = "".join(m.text for m in L.ocr_words(box, min_conf=0))
+        if _similar(got, text) < 0.8:
             raise RuntimeError(
-                f"{word} field did not take {text!r} - see {s.path}")
+                f"{word} field did not take {text!r} (OCR reads {got!r}) "
+                f"- see {s.path}")
+
+
+def _similar(a: str, b: str) -> float:
+    """How alike two strings are once case and punctuation are dropped."""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, L._norm(a), L._norm(b)).ratio()
 
 
 def to_wine_path(p: str | Path) -> str:
