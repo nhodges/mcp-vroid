@@ -15,6 +15,7 @@ full session env changes nothing here.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -36,6 +37,8 @@ def _newest(paths: list[Path]) -> Path | None:
 def ensure_session_env() -> dict[str, str]:
     """Fill in the missing session variables; returns what this call set."""
     filled: dict[str, str] = {}
+    if sys.platform == "win32":
+        return filled       # one desktop session, nothing to recover
     rd = _runtime_dir()
 
     if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):

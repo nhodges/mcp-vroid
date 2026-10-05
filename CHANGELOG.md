@@ -4,6 +4,39 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+* **Windows backend.** `driver/backend.py` selects the platform layer; on
+  Windows that is `window_win32` (Win32 window APIs, per-monitor DPI aware),
+  `capture_win32` (`PrintWindow`), `input_win32` (`SendInput`) and
+  `ocr_winrt` (`Windows.Media.Ocr`, so no tesseract). The Linux modules are
+  unchanged and still selected on Linux. Port of the original Linux project
+  to Windows; tested on Windows 11 with VRoid Studio 2.14.0.
+* **Windows input guard:** VRoid must be the foreground window and the
+  target inside its client rectangle; keys may also go to the native save
+  dialog VRoid owns; a cursor in a screen corner aborts; Win-key and
+  window-manager shortcuts are refused.
+* `vroid_close` tool, and `close`, `export-screen` and
+  `export --vrm-version` in `vroid-driver`.
+* `actions.open_export_screen()`; `export_vrm()` starts from the export
+  screen (or the VRM Settings modal) when one is already open, so export
+  options can be set before the walk continues.
+* Tests (`uv run pytest`) with captured screenshots as fixtures.
+
+### Fixed
+
+* UI anchors follow the window edges. VRoid's UI is fixed-size, not
+  proportional, so the fractional anchors only hit on a 2560x1440 capture;
+  they evaluate to the same pixels as before at that size.
+* VRM0.0 export: the form asks for `Title` / `Creator` rather than
+  `Avatar Name` / `Creators`; the VRM0.0 radio is matched exactly; the wait
+  for the VRM Settings modal no longer fires on the `Export as VRM` title.
+* The Export pill is found when the Reduce accordions are open.
+* `find_text` breaks confidence ties by row, so `Head Size` does not resolve
+  to the `Size` of `Body Size`.
+
 ## [0.1.0] — 2026-08-24
 
 First public release.

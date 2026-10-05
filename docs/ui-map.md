@@ -50,7 +50,7 @@ Tab strip at y ≈ 23:
 | colour | the `#RRGGBB` box at x ≈ 2450 (`vroid_set_color`) |
 | checkbox / radio | click the square/circle |
 | accordion | click the caption (e.g. `> Reduce Polygons`) |
-| dropdown | only in the native Wine dialogs; click, then arrow keys |
+| dropdown | click it, then click an entry of the list that opens (export page); in the native Wine dialogs: click, then arrow keys |
 
 ### Parameter names
 
@@ -106,3 +106,75 @@ Two traps here:
 
 Use `vroid_screenshot(whole_screen=true)` while the Wine dialog is up — it is
 not a child of the VRoid window and is not inside its geometry.
+
+## Checked on Windows
+
+VRoid Studio **2.14.0**, English UI, native on **Windows 11** at 100 %
+scaling, with the window maximised on a 3440 × 1440 monitor (client area
+**3440 × 1369**) and, for comparison, at its initial 1024 × 768. `W` and `H`
+below are the width and height of the capture.
+
+### The layout is fixed-size, pinned to the edges
+
+Nothing stretches with the window. Everything measured from the left or the
+top above is at the same pixel on Windows at any window size (`Face` is at
+x 97 in a 1024-wide window and in a 3440-wide one). Everything on the right
+keeps its distance from the right edge, so read the 2560-wide numbers above
+as:
+
+| thing | above | really |
+|---|---|---|
+| camera / share-export / kebab | 2415 / 2464 / 2512 | `W − 145` / `W − 96` / `W − 48` |
+| `New` / `Open` on the start screen | 2439 / 2495 | `W − 121` / `W − 65` |
+| numeric box of a Parameters row | 2505 | `W − 56` |
+| Export pill on the export page | 2412 | `W − 148` |
+
+Modals (base chooser, VRM Settings) are centred. VRM Settings is 570 px
+wide.
+
+### Differences from the map above
+
+* **First run.** A fresh install opens on a splash — the VRoid Studio logo
+  and one blue `Get Started` pill — instead of the start screen. It appears
+  once.
+* **Start screen with no saved models:** `Recently Edited` holds only the
+  `Create New` card (caption still at (118, 328)); the `Sample Models` heading
+  is at y ≈ 407 and the grid under it is as many columns wide as the window allows.
+* **The right-hand panel is not always there.** `Hairstyle → Hairstyle Sets`
+  and `Outfit → Whole Sets` show only the preset grid on the left; the
+  Parameters panel appears for sub-categories that have parameters (`Face`,
+  `Body`).
+* **There are dropdowns inside VRoid**, not only in the file dialog: on the
+  export page, `Materials` and `Texture Quality` / `Texture Atlas
+  Resolution`. Click the box, then click an entry of the list that opens
+  under it (entries are ~32 px apart).
+* **Export page, right column.** Three accordions above the pill, all closed
+  at first, pill at y ≈ 197:
+  * `Reduce Polygons` — `Edit Hair Cross-Section` (off), `Delete Transparent
+    Meshes` (**on** by default), then `Hair Smoothness`, `Hair`, `Face`,
+    `Body`, `Outfit`, each a 0–100 slider with a numeric box at `W − 56` that
+    takes a typed value, and `Reset`.
+  * `Reduce Materials` — `Materials`: `Default` / `2` / `8` / `12`. With
+    `Default`: a `Combine Hair Mesh` checkbox and `Texture Quality`. With a
+    number: `Texture Atlas Resolution`, `4096 x 4096` / `2048 x 2048`.
+  * `Reduce Bones`.
+
+  Opening them pushes the pill down (y ≈ 826 with the first two open). The
+  `Export Info` box left of the column reports polygons / materials / bones
+  and updates as you change things; the whole window dims for a few seconds
+  while it recomputes and **ignores clicks until it is done**.
+* **VRM Settings depends on the format.** `VRM1.0` asks for `Avatar Name`
+  and `Creators`; with `VRM0.0` selected the form is `Title` **required**,
+  `Creator` **required**, `Contact Information`, `Reference`, `Version`, …
+  The choice of format is remembered for the session. Escape does not close
+  the modal; **a click outside it does**, silently.
+* **Save dialog.** On Windows it is the native common file dialog, a
+  separate top-level window (class `#32770`) owned by the VRoid window. The
+  driver types the full path into its `File name` box, reads the box back to
+  check it, and presses Return.
+
+### Camera
+
+As measured on Linux: wheel down over the viewport zooms out (17 notches
+from the default framing shows the whole body), middle-drag moves the model
+with the pointer.

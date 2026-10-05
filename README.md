@@ -1,8 +1,8 @@
 # mcp-vroid
 
-**Drive VRoid Studio from any MCP client, on Linux/Wayland.** Launch the app,
-look at it, find widgets in the picture, click and type, set parameters, and
-export a `.vrm` — all as MCP tools.
+**Drive VRoid Studio from any MCP client, on Linux/Wayland or Windows 11.**
+Launch the app, look at it, find widgets in the picture, click and type, set
+parameters, and export a `.vrm` — all as MCP tools.
 
 ## Why
 
@@ -11,6 +11,8 @@ is the one a person uses: look at the window and move the mouse. So that is
 what this does — screenshot the window with `grim`, locate things with OCR and
 colour matching, and inject real pointer and keyboard events at the compositor
 level. The MCP client's model is the eyes; these tools are the hands.
+(That is the Linux stack; on Windows the same loop runs on `PrintWindow`,
+the built-in Windows OCR and `SendInput` — see [Windows 11](#windows-11).)
 
 ```
    grim ──► PNG ──► tesseract / cv2 ──► (x, y) ──► virtual pointer / XTEST
@@ -61,7 +63,11 @@ for window management. On Arch:
 sudo pacman -S grim tesseract tesseract-data-eng wayland gcc pkgconf
 ```
 
+Windows needs none of the above — see [Windows 11](#windows-11).
+
 ## Quickstart
+
+On Linux (for Windows, skip to [Windows 11](#windows-11)):
 
 ```bash
 git clone https://github.com/nhodges/mcp-vroid
@@ -113,9 +119,133 @@ Optional environment variables:
 | `MCP_VROID_VPOINTER` | `<checkout>/native/vpointer` | path to the pointer helper |
 | `MCP_VROID_MAX_IMAGE_PX` | `1600` | longest edge of images sent to the client (0 = never downscale) |
 
+## Windows 11
+
+The Windows backend drives a native VRoid Studio (Steam) with nothing but
+the operating system: Win32 for the window, `PrintWindow` for screenshots,
+`SendInput` for the mouse and keyboard, and the OCR engine that ships with
+Windows. There is nothing to compile and nothing to install besides Python
+packages. Tested on **Windows 11** with **VRoid Studio 2.14.0** (English UI)
+at 100 % display scaling, on a two-monitor desktop.
+
+### Requirements
+
+| | needed for | notes |
+|---|---|---|
+| Windows 10 or 11 | `PrintWindow`, per-monitor DPI awareness, `Windows.Media.Ocr` | only Windows 11 has been tested |
+| an **English OCR language** | locating by text | present on any English Windows install; `vroid_status` tells you. If it is missing: Settings → Time & language → Language & region → add English, or as administrator `Add-WindowsCapability -Online -Name "Language.OCR~~~en-US~0.0.1.0"` |
+| **VRoid Studio** via Steam (appid `1486350`), UI language English | the app being driven | launched through `steam://rungameid/1486350`, so Steam must be running. For a non-Steam install set `MCP_VROID_EXE` to the full path of `VRoidStudio.exe` |
+| Python **3.11+** and [`uv`](https://docs.astral.sh/uv/) | the server itself | the WinRT projection packages are pulled in on Windows only |
+
+Tesseract, `grim`, Hyprland and `native/build.sh` are **not** used on
+Windows.
+
+### Setup
+
+```powershell
+git clone https://github.com/nhodges/mcp-vroid
+cd mcp-vroid
+uv sync
+uv run vroid-driver launch    # starts VRoid through Steam, focuses and maximises it
+uv run vroid-driver shot      # prints the path of a PNG of the window - look at it
+```
+
+Start VRoid Studio by hand once before automating it: the very first run
+opens on a splash with a **Get Started** button instead of the start screen
+the tools expect. Click through it once; after that every launch lands on the
+start screen. No pixiv account is needed to create and export a model.
+
+Register it with Claude Code (PowerShell or cmd; use the real path of your
+checkout):
+
+```powershell
+claude mcp add vroid -- uv run --directory C:\path\to\mcp-vroid mcp-vroid
+```
+
+…or, for clients that take an `mcpServers` block:
+
+```json
+{
+  "mcpServers": {
+    "vroid": {
+      "command": "uv",
+      "args": ["run", "--directory", "C:\\path\\to\\mcp-vroid", "mcp-vroid"]
+    }
+  }
+}
+```
+
+Screenshots go to `%LOCALAPPDATA%\mcp-vroid\captures` and exports to
+`%LOCALAPPDATA%\mcp-vroid\out` unless `MCP_VROID_CAPTURES` / `MCP_VROID_OUT`
+say otherwise. `MCP_VROID_VPOINTER` has no meaning here.
+
+### What is different from Linux
+
+* **No workspaces.** VRoid stays on the monitor it is on and is *maximised*
+  rather than fullscreened; `vroid_release` has nothing to switch back to.
+  Every acting tool brings VRoid to the foreground first.
+* **One coordinate space.** The process is per-monitor DPI aware, so image
+  pixels, screen pixels and `SendInput` pixels are the same thing; `window`
+  space is pixels from the top-left of VRoid's client area and `layout` is
+  absolute virtual-desktop pixels. Any monitor, any position, any scaling.
+* **Paths are native.** `vroid_export_vrm("C:\\models\\x.vrm", …)` is typed
+  into the Windows *Export* dialog as it is, and the text is read back from
+  the dialog's edit box before Return is pressed.
+* **OCR has no confidence values.** Every word reports 100, so results are
+  not ranked by certainty. Each picture is read at two scales and both
+  readings are kept, because the engine misreads the odd small caption at one
+  scale only (`Title` → `Titte`).
+* **`vroid_screenshot` only ever shows VRoid** (`whole_screen=true` copies
+  the monitor VRoid is on). A Unity window that is covered or in the
+  background cannot be read and is reported as an error, not replaced with a
+  picture of whatever is on top of it.
+
+### Input safety on Windows
+
+`SendInput` moves the real cursor and types into whatever has focus, so the
+guard is stricter than on Linux and cannot be switched off:
+
+* **Fail-safe:** if the cursor is in a corner of any monitor when an action
+  is about to run, it raises instead. Push the mouse into a corner to stop.
+* **Pointer** events are sent only when VRoid Studio is the foreground window
+  *and* the target point is inside its client rectangle.
+* **Keys** are sent only when the foreground window is VRoid Studio or the
+  file dialog VRoid itself opened — a `#32770` dialog titled *Export* / *Save
+  As*, created by the VRoid process and owned by its window. Nothing else.
+* **No desktop shortcuts:** Win-key combinations, Alt+F4, Alt+Tab,
+  Alt+Escape, Alt+Space, Ctrl+Escape and Ctrl+Alt+Delete are refused.
+  `vroid_close` asks VRoid's own window to close and then ends VRoid's own
+  process.
+* The VRoid window is recognised by its window class **and** its executable
+  (`VRoidStudio.exe`), never by title alone.
+
+### Known limits on Windows
+
+* **It needs the desktop to itself for the length of a flow.** If another
+  program takes the foreground, the driver asks for it back once and
+  otherwise refuses; if a person or another program moves the mouse, or a
+  game has the cursor confined (`ClipCursor`), the action fails with an
+  error that says so. Nothing is overridden. An export is ~35 s of
+  uninterrupted control.
+* **VRoid does not scale its UI with the window** — widgets are fixed-size
+  and pinned to the edges. The driver's icon anchors follow the edges, but
+  the centred modals (base chooser, VRM Settings) need a window at least
+  ~1600 px wide; `vroid_launch` maximises it for that reason.
+* **Calibrated at 100 % scaling.** Coordinates stay correct at other scale
+  factors, but whether VRoid then draws its UI larger has not been tested;
+  if it does, the pixel anchors need re-measuring.
+* **English UI only**, and an English OCR language must be installed.
+* Windows will not let a background process take the foreground in every
+  situation (a UAC prompt, the lock screen, or an elevated window in front);
+  the tools raise rather than act.
+* VRoid started *as administrator* ignores input from a normal process.
+* Each `vroid-driver` call pays ~1 s of process start-up. Through the MCP
+  server a full-window OCR lookup is about a second and a click half a
+  second; new character ~20 s, an export ~35 s.
+
 ## Tools
 
-18 tools, in four groups.
+19 tools, in four groups.
 
 **Lifecycle**
 
@@ -124,6 +254,7 @@ Optional environment variables:
 | `vroid_launch(restart=false, timeout=240)` | Start VRoid via Steam if needed, park it on Hyprland workspace 9, remember the workspace you were on, focus + fullscreen it. `restart=true` kills the running instance first — unsaved work is lost. |
 | `vroid_status()` | Window present/focused/title/geometry, active workspace, capture dirs, and whether `vpointer`/`grim`/`tesseract`/`hyprctl` are available. Read-only, no OCR. |
 | `vroid_release()` | Switch back to the workspace the user was on. VRoid keeps running on ws 9. |
+| `vroid_close()` | Quit VRoid Studio by ending its own process. Unsaved work is lost. |
 
 **Seeing**
 
@@ -152,7 +283,7 @@ Optional environment variables:
 | `vroid_open_tab(name)` | Face / Hairstyle / Body / Outfit / Accessories / Look. |
 | `vroid_set_slider(label, value)` | Scrolls the Parameters panel to the row and types an exact value into its numeric box. |
 | `vroid_set_color(label, hex)` | Same, for a `#RRGGBB` colour box. |
-| `vroid_export_vrm(path, avatar_name, creator, version='1.0')` | The whole Export-as-VRM walk, including the VRM Settings metadata modal and Wine's save dialog. `version` picks VRM1.0 or VRM0.0. |
+| `vroid_export_vrm(path, avatar_name, creator, version='1.0')` | The whole Export-as-VRM walk, including the VRM Settings metadata modal and the save dialog (Wine's or Windows'). `version` picks VRM1.0 or VRM0.0. Starts from the export screen if it is already open, so the Reduce Polygons / Materials options can be set first. |
 | `vroid_save_project(name?)` | Ctrl+Shift+S to an explicit `.vroid` path, or a plain Save with no argument. |
 
 Every acting tool focuses VRoid first and **refuses to act if the focused
@@ -260,12 +391,14 @@ when you're done.
 ```bash
 uv run python scripts/smoke_test.py              # start the server, list tools, call vroid_status
 uv run python scripts/smoke_test.py --screenshot # + one passive capture if VRoid is open
+uv run pytest                                    # coordinate maths, OCR shaping, locating on saved captures
 uv run vroid-driver shot                         # the original driver CLI, still here
 ```
 
 `vroid-driver` (`mcp_vroid.driver.cli`) is a shell interface to the same
 engine — `launch`, `shot`, `find`, `click`, `tab`, `slider`, `export`, `cam`,
-`apply-params`, … — handy for debugging without an MCP client in the loop.
+`apply-params`, `export-screen`, `close`, … — handy for debugging without an
+MCP client in the loop.
 
 Layout:
 
@@ -273,12 +406,18 @@ Layout:
 src/mcp_vroid/server.py       MCP tool definitions (stdio)
 src/mcp_vroid/session_env.py  recovers the Wayland/X session env
 src/mcp_vroid/driver/         the engine
+  backend.py                  picks the platform layer below
   window.py                   hyprctl: find / launch / focus / workspaces   <- Hyprland-specific
   capture.py                  grim + coordinate spaces
-  locate.py                   tesseract OCR + colour button matching
   input.py                    vpointer (Wayland) + XTEST (X11)
+  window_win32.py             Win32: find / launch / focus / close          <- Windows
+  capture_win32.py            PrintWindow
+  input_win32.py              SendInput + the input guard
+  ocr_winrt.py                Windows.Media.Ocr
+  locate.py                   OCR (tesseract or Windows) + colour button matching
   actions.py                  the VRoid-specific flows
-native/vpointer.c             zwlr_virtual_pointer client
+native/vpointer.c             zwlr_virtual_pointer client (Linux only)
+tests/                        pytest, with captured screenshots as fixtures
 ```
 
 ## Contributing
@@ -299,3 +438,7 @@ Nothing here is auto-formatted or linted by CI; match the surrounding style.
 
 MIT — see [LICENSE](LICENSE). VRoid Studio is a product of pixiv Inc.; this
 project is unaffiliated with pixiv and simply drives the app's UI.
+
+The Windows backend is a port of the original Linux/Hyprland
+[mcp-vroid](https://github.com/nhodges/mcp-vroid) by Nuri Hodges, under the
+same licence.

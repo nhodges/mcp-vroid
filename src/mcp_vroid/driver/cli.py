@@ -13,6 +13,8 @@
     slider "Fem Height" 0.6     set a Parameters value
     new-character [Fem|Masc]    start screen -> new model
     export out/spike.vrm        full Export-as-VRM walk
+    export-screen               open the Export-as-VRM screen and stop there
+    close                       quit VRoid Studio (unsaved work is lost)
     restore                     switch back to the workspace you came from
 
 Every acting subcommand refuses to run unless VRoid Studio is the focused
@@ -26,10 +28,10 @@ import sys
 from pathlib import Path
 
 from . import actions as A
-from . import capture as C
-from . import input as I
 from . import locate as L
-from . import window as W
+from .backend import capture as C
+from .backend import input as I
+from .backend import window as W
 
 
 def _region(spec: str | None):
@@ -42,6 +44,9 @@ def _region(spec: str | None):
 def main(argv=None) -> int:
     from ..session_env import ensure_session_env
     ensure_session_env()
+    if sys.platform == "win32":
+        # OCR output is not always representable in the console code page
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(prog="vroid-driver", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -76,6 +81,9 @@ def main(argv=None) -> int:
     sp.add_argument("out", nargs="?", default=None)
     sp.add_argument("--name", default="SpikeAvatar")
     sp.add_argument("--creators", default="arrakis-vroid-driver")
+    sp.add_argument("--vrm-version", default="1.0", choices=["1.0", "0.0"])
+    sub.add_parser("export-screen")
+    sub.add_parser("close")
     sp = sub.add_parser("restore"); sp.add_argument("workspace", type=int)
 
     a = p.parse_args(argv)
@@ -88,6 +96,10 @@ def main(argv=None) -> int:
 
     if a.cmd == "restore":
         W.leave(a.workspace)
+        return 0
+
+    if a.cmd == "close":
+        print(json.dumps({"closed": A.close_vroid()}))
         return 0
 
     if a.cmd == "shot":
@@ -158,7 +170,11 @@ def main(argv=None) -> int:
             return 0
     elif a.cmd == "export":
         out = Path(a.out) if a.out else A.default_out()
-        print(A.export_vrm(out, avatar_name=a.name, creators=a.creators))
+        print(A.export_vrm(out, avatar_name=a.name, creators=a.creators,
+                           version=a.vrm_version))
+        return 0
+    elif a.cmd == "export-screen":
+        print(A.open_export_screen().path)
         return 0
 
     print(C.grab_window(tag=a.cmd).path)

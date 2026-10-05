@@ -22,8 +22,7 @@ from __future__ import annotations
 import functools
 import os
 import shutil
-import subprocess
-import time
+import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -38,19 +37,19 @@ from .session_env import ensure_session_env
 _FILLED_ENV = ensure_session_env()
 
 from .driver import actions as A  # noqa: E402
-from .driver import capture as C  # noqa: E402
-from .driver import input as I  # noqa: E402
 from .driver import locate as L  # noqa: E402
-from .driver import window as W  # noqa: E402
+from .driver.backend import capture as C  # noqa: E402
+from .driver.backend import input as I  # noqa: E402
+from .driver.backend import window as W  # noqa: E402
 from .driver.paths import CAPTURES, OUT, VPOINTER  # noqa: E402
 
 server = MCPServer(
     name="vroid",
     version="0.1.0",
     instructions=(
-        "Drives the VRoid Studio desktop app (Steam/Proton) on Hyprland by "
-        "screenshotting it, locating widgets with OCR, and injecting real "
-        "pointer/keyboard events.\n\n"
+        "Drives the VRoid Studio desktop app (Steam; Proton on Hyprland, or "
+        "native on Windows) by screenshotting it, locating widgets with "
+        "OCR, and injecting real pointer/keyboard events.\n\n"
         "The working loop is: vroid_launch -> vroid_screenshot (LOOK at the "
         "image) -> vroid_find_text / vroid_find_button to get coordinates -> "
         "vroid_click / vroid_type -> vroid_screenshot again to confirm. Never "
@@ -126,6 +125,20 @@ def _win_dict(win: W.Window | None) -> dict[str, Any]:
     }
 
 
+def _windows_helpers() -> dict[str, Any]:
+    """What the Windows backend depends on: SendInput and PrintWindow are
+    part of the OS, so the only thing that can be missing is an OCR
+    language."""
+    try:
+        from .driver import ocr_winrt
+
+        lang = ocr_winrt._get_engine("eng").recognizer_language.language_tag
+        ocr: dict[str, Any] = {"present": True, "language": lang}
+    except Exception as e:  # report it, do not fail vroid_status
+        ocr = {"present": False, "error": str(e)}
+    return {"backend": "win32 (SendInput + PrintWindow)", "windows_ocr": ocr}
+
+
 class Region(BaseModel):
     """A rectangle in image-pixel coordinates of a VRoid window capture."""
 
@@ -197,10 +210,8 @@ async def vroid_launch(
 
     def work() -> dict[str, Any]:
         global _prev_workspace
-        if restart and W.find_window():
-            subprocess.run(["pkill", "-f", "VRoidStudio.exe"],
-                           capture_output=True)
-            time.sleep(5)
+        if restart:
+            A.close_vroid()
         win, prev = W.prepare(timeout)
         if _prev_workspace is None and prev != W.WORKSPACE:
             _prev_workspace = prev
@@ -246,6 +257,8 @@ async def vroid_status() -> dict[str, Any]:
                 "hyprctl": bool(shutil.which("hyprctl")),
             },
         }
+        if sys.platform == "win32":
+            out["helpers"] = _windows_helpers()
         if win is not None:
             try:
                 out["capture_scale"] = C.output_scale()
@@ -272,6 +285,21 @@ async def vroid_release() -> dict[str, Any]:
             _prev_workspace = None
         return {"restored_workspace": prev,
                 "active_workspace": W.active_workspace()}
+
+    return await _blocking(work)
+
+
+@server.tool()
+async def vroid_close() -> dict[str, Any]:
+    """Quit VRoid Studio. UNSAVED WORK IS LOST - export or save first.
+
+    Ends VRoid's own process (after asking its window to close); it never
+    sends a window-manager shortcut, so no other application can be hit.
+    Returns closed=false if VRoid was not running.
+    """
+
+    def work() -> dict[str, Any]:
+        return {"closed": A.close_vroid()}
 
     return await _blocking(work)
 
@@ -476,7 +504,9 @@ SPACE_DOC = (
     "'image' = pixels of a window capture (what vroid_screenshot / "
     "vroid_find_* report - the default, and almost always what you want); "
     "'window' = Hyprland layout units relative to the window's top-left; "
-    "'layout' = absolute Hyprland layout units of the whole output."
+    "'layout' = absolute Hyprland layout units of the whole output. (On "
+    "Windows all three are plain pixels: of the capture, of the window's "
+    "client area, and of the virtual desktop.)"
 )
 
 
@@ -811,9 +841,10 @@ async def vroid_current_screen() -> dict[str, Any]:
 async def vroid_export_vrm(
     path: Annotated[
         str,
-        Field(description="Where to write the .vrm, as a normal Linux path. "
-                          "Translated to the Proton prefix's Z:\\ mapping for "
-                          "the Wine save dialog."),
+        Field(description="Where to write the .vrm, as a normal absolute "
+                          "path for this OS. On Linux it is translated to "
+                          "the Proton prefix's Z:\\ mapping for the Wine "
+                          "save dialog; on Windows it is typed as-is."),
     ],
     avatar_name: Annotated[
         str,

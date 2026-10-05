@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent.parent      # .../mcp_vroid
@@ -19,6 +20,10 @@ REPO = PACKAGE.parent.parent                          # .../<checkout>  (src lay
 
 
 def _state_home() -> Path:
+    if sys.platform == "win32" and not os.environ.get("XDG_STATE_HOME"):
+        # no XDG on Windows: %LOCALAPPDATA%\mcp-vroid\{captures,out}
+        return Path(os.environ.get("LOCALAPPDATA")
+                    or Path.home() / "AppData/Local")
     return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +52,16 @@ def ocr_words(img: Image.Image | Shot, upscale: float = 2.0,
     if isinstance(img, Shot):
         img = img.image
     prepped = _prep(img, upscale, invert)
+    if sys.platform == "win32":
+        # Windows' built-in OCR instead of the tesseract binary; same boxes.
+        from .ocr_winrt import merge_readings
+        from .ocr_winrt import ocr_words as winrt_words
+        words = winrt_words(prepped, upscale, lang)
+        if upscale != 1.0:
+            # a second reading at native size: see merge_readings
+            words = merge_readings(
+                words, winrt_words(_prep(img, 1.0, invert), 1.0, lang))
+        return [Match(*w) for w in words if w[1] >= min_conf]
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "ocr.png"
         prepped.save(p)
@@ -123,10 +134,22 @@ def find_text(img: Image.Image | Shot, needle: str, *, exact: bool = False,
                 continue
             seen.add(key)
             found.append(m)
-    found.sort(key=lambda m: -m.conf)
+    rows = {id(m): _row_words(m, found) for m in found}
+    found.sort(key=lambda m: (-m.conf, -rows[id(m)]))
     if all_matches:
         return found
     return found[0] if found else None
+
+
+def _row_words(m: Match, found: list[Match]) -> int:
+    """How many different matched words share m's text row.
+
+    A tie-break for multi-word needles: "Head Size" hits the "Size" of
+    "Body Size" too, and an OCR engine with no per-word confidence (Windows)
+    cannot rank the two. The row holding more of the needle's words wins.
+    """
+    return len({_norm(o.text) for o in found
+                if abs(o.center[1] - m.center[1]) < 12})
 
 
 def all_text(img: Image.Image | Shot, **kw) -> list[Match]:
